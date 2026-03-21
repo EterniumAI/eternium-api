@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eternium API — Admin</title>
+<style>
+  :root { --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e; --text: #e4e4ef; --muted: #8888a0; --accent: #6c63ff; --accent2: #a78bfa; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --code-bg: #1a1a2e; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+  /* Auth */
+  #admin-auth { text-align: center; padding: 6rem 0; }
+  #admin-auth h1 { font-size: 1.5rem; color: var(--accent2); margin-bottom: 1rem; }
+  #admin-auth input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.75rem; border-radius: 8px; width: 280px; font-size: 1rem; }
+  #admin-auth button { background: var(--accent); color: #fff; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-weight: 600; margin-left: 0.5rem; }
+
+  /* Header */
+  #admin-panel { display: none; }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem; }
+  header h1 { font-size: 1.3rem; color: var(--accent2); }
+  .refresh { background: var(--surface); border: 1px solid var(--border); color: var(--muted); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+  .refresh:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
+  .stat .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; font-weight: 600; }
+  .stat .val { font-size: 1.6rem; font-weight: 700; margin-top: 0.25rem; }
+  .green { color: var(--green); } .yellow { color: var(--yellow); } .red { color: var(--red); }
+
+  /* Sections */
+  .section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; }
+  .section h3 { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 0.5rem 0.6rem; font-size: 0.8rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; }
+  .badge { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 4px; }
+  .badge-free { background: #22c55e22; color: var(--green); }
+  .badge-starter { background: #3b82f622; color: #60a5fa; }
+  .badge-builder { background: #6c63ff22; color: var(--accent); }
+  .badge-scale { background: #a78bfa22; color: var(--accent2); }
+  .badge-enterprise { background: #eab30822; color: var(--yellow); }
+  .action-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 0.2rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
+  .action-btn:hover { border-color: var(--red); color: var(--red); }
+  .action-btn.activate:hover { border-color: var(--green); color: var(--green); }
+
+  /* Alerts */
+  .alerts { display: grid; gap: 0.75rem; }
+  .alert { background: var(--code-bg); border-left: 3px solid; padding: 0.75rem 1rem; border-radius: 0 6px 6px 0; font-size: 0.85rem; }
+  .alert.warning { border-color: var(--yellow); }
+  .alert.danger { border-color: var(--red); }
+  .alert.info { border-color: var(--accent); }
+  .alert .title { font-weight: 600; margin-bottom: 0.25rem; }
+
+  .empty { text-align: center; color: var(--muted); padding: 2rem; font-size: 0.9rem; }
+  footer { text-align: center; padding: 1.5rem 0; color: var(--muted); font-size: 0.75rem; border-top: 1px solid var(--border); margin-top: 1rem; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div id="admin-auth">
+    <h1>Admin Access</h1>
+    <input id="admin-key" type="password" placeholder="Admin API key">
+    <button onclick="adminLogin()">Enter</button>
+    <div id="admin-error" style="color:var(--red);margin-top:0.5rem;font-size:0.85rem;"></div>
+  </div>
+
+  <div id="admin-panel">
+    <header>
+      <h1>Eternium API — Admin</h1>
+      <div>
+        <span id="last-refresh" style="color:var(--muted);font-size:0.8rem;margin-right:1rem;"></span>
+        <button class="refresh" onclick="loadAll()">Refresh</button>
+      </div>
+    </header>
+
+    <!-- Alerts -->
+    <div class="section" id="alerts-section" style="display:none;">
+      <h3>Alerts</h3>
+      <div class="alerts" id="alerts"></div>
+    </div>
+
+    <!-- Revenue stats -->
+    <div class="stats">
+      <div class="stat"><div class="label">Total Users</div><div class="val" id="s-users">0</div></div>
+      <div class="stat"><div class="label">Paying Users</div><div class="val green" id="s-paying">0</div></div>
+      <div class="stat"><div class="label">MRR</div><div class="val green" id="s-mrr">$0</div></div>
+      <div class="stat"><div class="label">Total Revenue (MTD)</div><div class="val" id="s-revenue">$0</div></div>
+      <div class="stat"><div class="label">Total Generations</div><div class="val" id="s-gens">0</div></div>
+      <div class="stat"><div class="label">Kie.ai Cost (est)</div><div class="val yellow" id="s-cost">$0</div></div>
+      <div class="stat"><div class="label">Gross Margin</div><div class="val green" id="s-margin">0%</div></div>
+    </div>
+
+    <!-- Users table -->
+    <div class="section">
+      <h3>All Users</h3>
+      <table>
+        <thead>
+          <tr><th>Email</th><th>Name</th><th>Tier</th><th>Spent</th><th>Gens</th><th>Cached</th><th>Key</th><th>Created</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="users-body">
+          <tr><td colspan="9" class="empty">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Model breakdown -->
+    <div class="section">
+      <h3>Model Usage (All Users, This Month)</h3>
+      <table>
+        <thead><tr><th>Model</th><th>Generations</th><th>Revenue</th><th>Est. Cost</th><th>Margin</th></tr></thead>
+        <tbody id="models-body">
+          <tr><td colspan="5" class="empty">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Kie.ai health -->
+    <div class="section">
+      <h3>System Health</h3>
+      <div class="stats" style="margin-bottom:0;">
+        <div class="stat"><div class="label">Kie.ai Status</div><div class="val green" id="h-kie">--</div></div>
+        <div class="stat"><div class="label">Kie.ai Credits</div><div class="val" id="h-credits">--</div></div>
+        <div class="stat"><div class="label">Cache Hit Rate</div><div class="val green" id="h-cache">--</div></div>
+        <div class="stat"><div class="label">Avg Response</div><div class="val" id="h-latency">--</div></div>
+      </div>
+    </div>
+
+    <footer>Eternium Admin &middot; Data refreshes on demand</footer>
+  </div>
+</div>
+
+<script>
+const BASE = window.location.origin;
+let adminKey = '';
+
+function adminLogin() {
+  adminKey = document.getElementById('admin-key').value.trim();
+  if (!adminKey) return;
+  loadAll();
+}
+
+async function adminFetch(path) {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'X-API-Key': adminKey, 'X-Admin': 'true' },
+  });
+  if (res.status === 403) {
+    document.getElementById('admin-error').textContent = 'Not authorized. Use an admin-tier API key.';
+    throw new Error('Not admin');
+  }
+  return res.json();
+}
+
+async function loadAll() {
+  try {
+    const data = await adminFetch('/admin/overview');
+
+    document.getElementById('admin-auth').style.display = 'none';
+    document.getElementById('admin-panel').style.display = 'block';
+    document.getElementById('last-refresh').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+
+    // Stats
+    document.getElementById('s-users').textContent = data.total_users || 0;
+    document.getElementById('s-paying').textContent = data.paying_users || 0;
+    document.getElementById('s-mrr').textContent = '$' + (data.mrr || 0).toFixed(0);
+    document.getElementById('s-revenue').textContent = '$' + (data.total_spent || 0).toFixed(2);
+    document.getElementById('s-gens').textContent = data.total_generations || 0;
+    document.getElementById('s-cost').textContent = '$' + (data.estimated_kie_cost || 0).toFixed(2);
+
+    const margin = data.total_spent > 0
+      ? ((1 - (data.estimated_kie_cost / data.total_spent)) * 100).toFixed(0)
+      : '0';
+    document.getElementById('s-margin').textContent = margin + '%';
+    document.getElementById('s-margin').className = 'val ' + (margin > 20 ? 'green' : margin > 10 ? 'yellow' : 'red');
+
+    // Alerts
+    const alerts = data.alerts || [];
+    if (alerts.length > 0) {
+      document.getElementById('alerts-section').style.display = 'block';
+      document.getElementById('alerts').innerHTML = alerts.map(a =>
+        `<div class="alert ${a.level}"><div class="title">${a.title}</div>${a.message}</div>`
+      ).join('');
+    }
+
+    // Users table
+    const users = data.users || [];
+    document.getElementById('users-body').innerHTML = users.length === 0
+      ? '<tr><td colspan="9" class="empty">No users yet.</td></tr>'
+      : users.map(u => `
+        <tr>
+          <td>${u.email}</td>
+          <td>${u.name || '—'}</td>
+          <td><span class="badge badge-${u.tier}">${u.tier}</span></td>
+          <td>$${(u.spent || 0).toFixed(2)}</td>
+          <td>${u.generations || 0}</td>
+          <td>${u.cached || 0}</td>
+          <td style="font-family:monospace;font-size:0.75rem;color:var(--muted);">${u.key ? u.key.slice(0, 10) + '...' : '—'}</td>
+          <td>${u.created ? new Date(u.created).toLocaleDateString() : '—'}</td>
+          <td>
+            ${u.active !== false
+              ? `<button class="action-btn" onclick="revokeUser('${u.email}')">Revoke</button>`
+              : `<button class="action-btn activate" onclick="activateUser('${u.email}')">Activate</button>`}
+          </td>
+        </tr>
+      `).join('');
+
+    // Model breakdown
+    const models = data.model_breakdown || [];
+    document.getElementById('models-body').innerHTML = models.length === 0
+      ? '<tr><td colspan="5" class="empty">No usage data yet.</td></tr>'
+      : models.map(m => {
+        const mgn = m.revenue > 0 ? ((1 - m.cost / m.revenue) * 100).toFixed(0) : '0';
+        return `<tr><td>${m.model}</td><td>${m.count}</td><td>$${m.revenue.toFixed(2)}</td><td>$${m.cost.toFixed(2)}</td><td>${mgn}%</td></tr>`;
+      }).join('');
+
+    // Health
+    document.getElementById('h-kie').textContent = data.kie_status || 'OK';
+    document.getElementById('h-credits').textContent = data.kie_credits || '—';
+    document.getElementById('h-cache').textContent = (data.cache_hit_rate || 0) + '%';
+
+  } catch (e) {
+    if (e.message !== 'Not admin') console.error(e);
+  }
+}
+
+async function revokeUser(email) {
+  if (!confirm(`Revoke API access for ${email}?`)) return;
+  await adminFetch(`/admin/users/${encodeURIComponent(email)}/revoke`);
+  loadAll();
+}
+
+async function activateUser(email) {
+  await adminFetch(`/admin/users/${encodeURIComponent(email)}/activate`);
+  loadAll();
+}
+</script>
+</body>
+</html>

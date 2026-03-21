@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eternium API — Dashboard</title>
+<style>
+  :root { --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e; --text: #e4e4ef; --muted: #8888a0; --accent: #6c63ff; --accent2: #a78bfa; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --code-bg: #1a1a2e; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+  .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+  /* Auth */
+  #auth-screen { text-align: center; padding: 6rem 0; }
+  #auth-screen h1 { font-size: 2rem; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 1rem; }
+  #auth-screen input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.75rem 1rem; border-radius: 8px; width: 320px; font-size: 1rem; margin-bottom: 1rem; display: block; margin-left: auto; margin-right: auto; }
+  #auth-screen button { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border: none; padding: 0.75rem 2rem; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 600; }
+  #auth-screen button:hover { opacity: 0.9; }
+  #auth-error { color: var(--red); margin-top: 0.5rem; font-size: 0.9rem; }
+
+  /* Dashboard */
+  #dashboard { display: none; }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+  header h1 { font-size: 1.5rem; color: var(--accent2); }
+  .tier-badge { background: var(--accent); color: #fff; font-size: 0.75rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 9999px; }
+  .logout { background: none; border: 1px solid var(--border); color: var(--muted); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+  .logout:hover { border-color: var(--red); color: var(--red); }
+
+  /* Stats grid */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
+  .stat-card .label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 0.25rem; }
+  .stat-card .value { font-size: 1.8rem; font-weight: 700; }
+  .stat-card .sub { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+  .green { color: var(--green); }
+  .yellow { color: var(--yellow); }
+  .red { color: var(--red); }
+
+  /* Budget bar */
+  .budget-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 2rem; }
+  .budget-bar h3 { font-size: 0.9rem; color: var(--muted); margin-bottom: 0.75rem; }
+  .bar-track { background: var(--code-bg); border-radius: 6px; height: 12px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease; }
+  .bar-labels { display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted); }
+
+  /* Activity table */
+  .activity { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
+  .activity h3 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; }
+  .cached-badge { background: var(--green); color: #000; font-size: 0.7rem; font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 4px; }
+
+  /* Code block */
+  .quick-start { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 2rem; }
+  .quick-start h3 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 0.75rem; }
+  .tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+  .tab { background: var(--code-bg); border: 1px solid var(--border); color: var(--muted); padding: 0.3rem 0.8rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+  .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  pre { background: var(--code-bg); border-radius: 6px; padding: 1rem; overflow-x: auto; font-size: 0.8rem; }
+  code { font-family: 'JetBrains Mono', 'Fira Code', monospace; color: var(--text); }
+
+  .empty { text-align: center; color: var(--muted); padding: 2rem; }
+  footer { text-align: center; padding: 2rem 0; color: var(--muted); font-size: 0.8rem; margin-top: 2rem; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Auth screen -->
+  <div id="auth-screen">
+    <h1>Eternium API Dashboard</h1>
+    <p style="color: var(--muted); margin-bottom: 2rem;">Enter your API key to view usage and manage your account.</p>
+    <input id="api-key-input" type="password" placeholder="etrn_your_api_key" autocomplete="off">
+    <button onclick="authenticate()">Connect</button>
+    <div id="auth-error"></div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboard">
+    <header>
+      <div>
+        <h1>Dashboard</h1>
+        <span id="key-name" style="color: var(--muted); font-size: 0.85rem;"></span>
+      </div>
+      <div style="display: flex; gap: 0.75rem; align-items: center;">
+        <span class="tier-badge" id="tier-badge"></span>
+        <button class="logout" onclick="logout()">Disconnect</button>
+      </div>
+    </header>
+
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat-card">
+        <div class="label">Spent This Month</div>
+        <div class="value" id="stat-spent">$0.00</div>
+        <div class="sub" id="stat-spent-sub"></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Remaining</div>
+        <div class="value green" id="stat-remaining">$0.00</div>
+        <div class="sub" id="stat-remaining-sub"></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Generations</div>
+        <div class="value" id="stat-generations">0</div>
+        <div class="sub" id="stat-gen-sub"></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Cache Savings</div>
+        <div class="value green" id="stat-cache">$0.00</div>
+        <div class="sub" id="stat-cache-sub"></div>
+      </div>
+    </div>
+
+    <!-- Budget bar -->
+    <div class="budget-bar">
+      <h3>Monthly Budget</h3>
+      <div class="bar-track">
+        <div class="bar-fill" id="budget-fill" style="width: 0%; background: var(--green);"></div>
+      </div>
+      <div class="bar-labels">
+        <span id="budget-spent">$0.00 used</span>
+        <span id="budget-limit">$0.00 limit</span>
+      </div>
+    </div>
+
+    <!-- Quick start -->
+    <div class="quick-start">
+      <h3>Quick Start</h3>
+      <div class="tabs">
+        <div class="tab active" onclick="showTab('js')">JavaScript</div>
+        <div class="tab" onclick="showTab('py')">Python</div>
+        <div class="tab" onclick="showTab('curl')">cURL</div>
+      </div>
+      <pre id="code-js"><code>import { Eternium } from 'eternium-sdk'
+
+const client = new Eternium('<span class="key-display">YOUR_KEY</span>')
+
+// Generate image — waits and returns download URL
+const img = await client.image('A mountain landscape, golden hour')
+console.log(img.url)
+
+// Generate video
+const vid = await client.video('Drone flyover of a city at night')
+console.log(vid.url)
+
+// Run a pipeline — 3 product shots in one call
+const pack = await client.runPipeline('product-shot', 'White sneakers')
+pack.results.forEach(r => console.log(r.url))</code></pre>
+      <pre id="code-py" style="display:none;"><code>from eternium import Eternium
+
+client = Eternium("<span class="key-display">YOUR_KEY</span>")
+
+# Generate image — waits and returns download URL
+img = client.image("A mountain landscape, golden hour")
+print(img["url"])
+
+# Generate video
+vid = client.video("Drone flyover of a city at night")
+print(vid["url"])
+
+# Run a pipeline — 3 product shots in one call
+pack = client.run_pipeline("product-shot", "White sneakers")
+for r in pack["results"]:
+    print(r["url"])</code></pre>
+      <pre id="code-curl" style="display:none;"><code>curl -X POST https://api.eternium.ai/v1/generate \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <span class="key-display">YOUR_KEY</span>" \
+  -d '{"model":"nano-banana-pro","prompt":"A mountain landscape"}'
+
+# Check task status
+curl https://api.eternium.ai/v1/tasks/TASK_ID \
+  -H "X-API-Key: <span class="key-display">YOUR_KEY</span>"
+
+# Get download URL
+curl https://api.eternium.ai/v1/tasks/TASK_ID/download \
+  -H "X-API-Key: <span class="key-display">YOUR_KEY</span>"</code></pre>
+    </div>
+
+    <!-- Activity -->
+    <div class="activity">
+      <h3>Recent Activity</h3>
+      <table>
+        <thead><tr><th>Model</th><th>Cost</th><th>Cache</th><th>Time</th></tr></thead>
+        <tbody id="activity-body">
+          <tr><td colspan="4" class="empty">No activity yet. Make your first API call!</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <footer>&copy; 2026 Eternium LLC. All rights reserved.</footer>
+  </div>
+</div>
+
+<script>
+const BASE = 'https://api.eternium.ai';
+let currentKey = '';
+
+function authenticate() {
+  const key = document.getElementById('api-key-input').value.trim();
+  if (!key) return;
+  currentKey = key;
+
+  fetch(`${BASE}/v1/usage`, { headers: { 'X-API-Key': key } })
+    .then(r => {
+      if (!r.ok) throw new Error('Invalid API key');
+      return r.json();
+    })
+    .then(data => {
+      localStorage.setItem('etrn_key', key);
+      showDashboard(data);
+    })
+    .catch(err => {
+      document.getElementById('auth-error').textContent = err.message;
+    });
+}
+
+function logout() {
+  localStorage.removeItem('etrn_key');
+  currentKey = '';
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'block';
+  document.getElementById('api-key-input').value = '';
+}
+
+function showDashboard(data) {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+
+  const maskedKey = currentKey.slice(0, 8) + '...' + currentKey.slice(-4);
+
+  document.getElementById('key-name').textContent = maskedKey;
+  document.getElementById('tier-badge').textContent = data.tier_name || data.tier || 'Free';
+  document.getElementById('stat-spent').textContent = data.spent || '$0.00';
+  document.getElementById('stat-remaining').textContent = data.remaining || '$0.00';
+  document.getElementById('stat-remaining-sub').textContent = `of ${data.monthly_limit || '$0.00'}`;
+  document.getElementById('stat-generations').textContent = data.generations || 0;
+  document.getElementById('stat-cache').textContent = data.cache_savings || '$0.00';
+  document.getElementById('stat-cache-sub').textContent = `${data.cached_hits || 0} cached responses`;
+
+  // Budget bar
+  const spent = parseFloat((data.spent || '$0').replace('$', ''));
+  const limit = parseFloat((data.monthly_limit || '$1').replace('$', ''));
+  const pct = Math.min((spent / limit) * 100, 100);
+  const fill = document.getElementById('budget-fill');
+  fill.style.width = pct + '%';
+  fill.style.background = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--green)';
+  document.getElementById('budget-spent').textContent = `${data.spent || '$0.00'} used`;
+  document.getElementById('budget-limit').textContent = `${data.monthly_limit || '$0.00'} limit`;
+
+  // Key display in code
+  document.querySelectorAll('.key-display').forEach(el => el.textContent = maskedKey);
+
+  // Activity table
+  const tasks = data.recent_tasks || [];
+  const tbody = document.getElementById('activity-body');
+  if (tasks.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">No activity yet.</td></tr>';
+  } else {
+    tbody.innerHTML = tasks.map(t => `
+      <tr>
+        <td>${t.model}</td>
+        <td>$${(t.cost || 0).toFixed(4)}</td>
+        <td>${t.cached ? '<span class="cached-badge">CACHED</span>' : '—'}</td>
+        <td>${timeAgo(t.ts)}</td>
+      </tr>
+    `).join('');
+  }
+}
+
+function showTab(tab) {
+  ['js', 'py', 'curl'].forEach(t => {
+    document.getElementById('code-' + t).style.display = t === tab ? 'block' : 'none';
+  });
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  event.target.classList.add('active');
+}
+
+function timeAgo(ts) {
+  const diff = Date.now() - ts;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+  return Math.floor(diff / 86400000) + 'd ago';
+}
+
+// Auto-login from stored key
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = localStorage.getItem('etrn_key');
+  if (saved) {
+    currentKey = saved;
+    document.getElementById('api-key-input').value = saved;
+    authenticate();
+  }
+});
+</script>
+</body>
+</html>

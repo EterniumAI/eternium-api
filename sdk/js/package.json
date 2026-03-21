@@ -1,0 +1,24 @@
+{
+  "name": "eternium-sdk",
+  "version": "1.0.0",
+  "description": "Official Eternium API SDK — AI image & video generation. One call, one result.",
+  "main": "index.cjs",
+  "module": "index.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "require": "./index.cjs"
+    }
+  },
+  "types": "index.d.ts",
+  "keywords": ["eternium", "ai", "image-generation", "video-generation", "kie", "kling", "api", "sdk"],
+  "author": "Eternium LLC",
+  "license": "MIT",
+  "homepage": "https://api.eternium.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EterniumAI/eternium-sdk"
+  },
+  "files": ["index.js", "index.cjs", "index.d.ts"]
+}

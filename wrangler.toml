@@ -1,0 +1,43 @@
+name = "eternium-api"
+main = "worker.js"
+compatibility_date = "2024-12-01"
+
+# Custom domain: api.eternium.ai
+# Set up via Cloudflare Dashboard → Workers → Custom Domains
+# Or use routes below if proxying through a zone:
+# routes = [{ pattern = "api.eternium.ai/*", zone_name = "eternium.ai" }]
+
+[vars]
+ADMIN_EMAIL = "ty@eternium.ai"
+
+# ── KV Namespaces ────────────────────────────────────────────────
+# Create ALL of these before first deploy:
+#   wrangler kv namespace create API_KEYS
+#   wrangler kv namespace create USERS
+#   wrangler kv namespace create USAGE
+#   wrangler kv namespace create CACHE
+#
+# Then paste the IDs below:
+
+[[kv_namespaces]]
+binding = "API_KEYS"
+id = "REPLACE_WITH_API_KEYS_NAMESPACE_ID"
+
+[[kv_namespaces]]
+binding = "USERS"
+id = "REPLACE_WITH_USERS_NAMESPACE_ID"
+
+[[kv_namespaces]]
+binding = "USAGE"
+id = "REPLACE_WITH_USAGE_NAMESPACE_ID"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "REPLACE_WITH_CACHE_NAMESPACE_ID"
+
+# ── Secrets (set via dashboard or CLI) ───────────────────────────
+# wrangler secret put KIE_API_KEY
+# wrangler secret put STRIPE_SECRET_KEY
+# wrangler secret put STRIPE_WEBHOOK_SECRET
+# wrangler secret put JWT_SECRET
+# wrangler secret put API_KEYS_JSON    # Fallback if KV not set up yet

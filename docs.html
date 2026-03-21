@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eternium API — Documentation</title>
+<style>
+  :root { --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e; --text: #e4e4ef; --muted: #8888a0; --accent: #6c63ff; --accent2: #a78bfa; --green: #22c55e; --code-bg: #1a1a2e; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+  .container { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+  nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; border-bottom: 1px solid var(--border); margin-bottom: 2rem; }
+  nav a { color: var(--muted); font-size: 0.9rem; margin-left: 1.5rem; } nav a:hover { color: var(--text); text-decoration: none; }
+  nav .logo { font-weight: 700; font-size: 1.1rem; color: var(--accent2); }
+  header { text-align: center; padding: 3rem 0 2.5rem; }
+  header h1 { font-size: 2.5rem; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  header p { color: var(--muted); font-size: 1.15rem; margin-top: 0.5rem; }
+  .badge { display: inline-block; background: var(--green); color: #000; font-size: 0.75rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 9999px; margin-top: 1rem; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }
+  .feature { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; text-align: center; }
+  .feature .icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .feature h4 { font-size: 0.95rem; margin-bottom: 0.25rem; }
+  .feature p { font-size: 0.8rem; }
+  h2 { font-size: 1.4rem; margin: 2.5rem 0 1rem; color: var(--accent2); }
+  h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  p, li { color: var(--muted); }
+  a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+  code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.9em; background: var(--code-bg); padding: 0.15em 0.4em; border-radius: 4px; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; overflow-x: auto; margin: 1rem 0; }
+  pre code { background: none; padding: 0; font-size: 0.85rem; color: var(--text); }
+  .tabs { display: flex; gap: 0.5rem; margin-bottom: -1px; position: relative; z-index: 1; }
+  .tab { background: var(--code-bg); border: 1px solid var(--border); border-bottom: none; color: var(--muted); padding: 0.4rem 1rem; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 0.85rem; }
+  .tab.active { background: var(--code-bg); color: var(--accent); border-color: var(--accent); }
+  .endpoint { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin: 1rem 0; }
+  .method { display: inline-block; font-weight: 700; font-size: 0.8rem; padding: 0.2rem 0.5rem; border-radius: 4px; margin-right: 0.5rem; }
+  .method.post { background: #2563eb22; color: #60a5fa; }
+  .method.get { background: #22c55e22; color: #4ade80; }
+  .model-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin: 1rem 0; }
+  .model-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+  .model-card h4 { font-size: 1rem; color: var(--text); margin-bottom: 0.25rem; }
+  .model-card .type { font-size: 0.75rem; color: var(--accent); text-transform: uppercase; font-weight: 600; }
+  .model-card .price { font-size: 0.8rem; color: var(--green); margin-top: 0.25rem; }
+  .pipeline-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin: 1rem 0; }
+  .pipeline-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+  .pipeline-card h4 { color: var(--text); margin-bottom: 0.25rem; }
+  .pipeline-card .steps { font-size: 0.8rem; color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th, td { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
+  .cta { text-align: center; padding: 3rem 0; }
+  .btn { display: inline-block; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; font-weight: 600; padding: 0.75rem 2rem; border-radius: 8px; font-size: 1rem; margin: 0 0.5rem; }
+  .btn-outline { display: inline-block; border: 1px solid var(--accent); color: var(--accent); font-weight: 600; padding: 0.75rem 2rem; border-radius: 8px; font-size: 1rem; margin: 0 0.5rem; }
+  footer { text-align: center; padding: 2rem 0; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--border); margin-top: 3rem; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <nav>
+    <span class="logo">Eternium API</span>
+    <div>
+      <a href="#models">Models</a>
+      <a href="#pipelines">Pipelines</a>
+      <a href="#endpoints">Endpoints</a>
+      <a href="#sdks">SDKs</a>
+      <a href="#pricing">Pricing</a>
+      <a href="https://api.eternium.ai/dashboard">Dashboard</a>
+    </div>
+  </nav>
+
+  <header>
+    <h1>Eternium API</h1>
+    <p>AI generation built for agents. One key, best models, intelligent caching.</p>
+    <span class="badge">v2.0 — Live</span>
+  </header>
+
+  <div class="features">
+    <div class="feature">
+      <div class="icon">&#9889;</div>
+      <h4>Agent-Ready</h4>
+      <p>SDKs that handle polling, retries, and timeouts. One call, one result.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">&#128200;</div>
+      <h4>Smart Caching</h4>
+      <p>Identical prompts served from cache. Cut agent costs by 60%.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">&#128640;</div>
+      <h4>Pipelines</h4>
+      <p>Multi-model workflows in a single API call. Product shots, video ads, social packs.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">&#128176;</div>
+      <h4>Usage Tracking</h4>
+      <p>Real-time spend, budget alerts, and cache savings. Never overspend.</p>
+    </div>
+  </div>
+
+  <h2 id="sdks">Quick Start</h2>
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('js')">JavaScript</div>
+    <div class="tab" onclick="showTab('py')">Python</div>
+    <div class="tab" onclick="showTab('curl')">cURL</div>
+  </div>
+  <pre id="code-js"><code>import { Eternium } from 'eternium-sdk'
+
+const client = new Eternium('etrn_your_key')
+
+// Generate image — returns download URL when done
+const img = await client.image('A futuristic city at sunset')
+console.log(img.url)
+
+// Generate video
+const vid = await client.video('Drone flyover at night', { duration: 10, sound: true })
+console.log(vid.url)
+
+// Run a pipeline — 3 product shots, one call
+const pack = await client.runPipeline('product-shot', 'White sneakers on marble')
+pack.results.forEach(r => console.log(r.url))
+
+// Check your usage
+const usage = await client.getUsage()
+console.log(`${usage.remaining} remaining this month`)</code></pre>
+  <pre id="code-py" style="display:none;"><code>from eternium import Eternium
+
+client = Eternium("etrn_your_key")
+
+# Generate image — returns download URL when done
+img = client.image("A futuristic city at sunset")
+print(img["url"])
+
+# Generate video
+vid = client.video("Drone flyover at night", duration=10, sound=True)
+print(vid["url"])
+
+# Run a pipeline — 3 product shots, one call
+pack = client.run_pipeline("product-shot", "White sneakers on marble")
+for r in pack["results"]:
+    print(r["url"])
+
+# Check your usage
+usage = client.get_usage()
+print(f"{usage['remaining']} remaining this month")</code></pre>
+  <pre id="code-curl" style="display:none;"><code># Generate an image
+curl -X POST https://api.eternium.ai/v1/generate \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: etrn_your_key" \
+  -d '{"model":"nano-banana-pro","prompt":"A futuristic city at sunset"}'
+
+# Run a pipeline
+curl -X POST https://api.eternium.ai/v1/pipelines/run \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: etrn_your_key" \
+  -d '{"pipeline":"product-shot","prompt":"White sneakers on marble"}'
+
+# Check task status
+curl https://api.eternium.ai/v1/tasks/TASK_ID \
+  -H "X-API-Key: etrn_your_key"
+
+# Check your usage
+curl https://api.eternium.ai/v1/usage \
+  -H "X-API-Key: etrn_your_key"</code></pre>
+  <p style="margin-top: 0.5rem; font-size: 0.85rem;">Install: <code>npm i eternium-sdk</code> or <code>pip install eternium-sdk</code></p>
+
+  <h2>Authentication</h2>
+  <p>Include your API key in every request via either header:</p>
+  <pre><code>X-API-Key: etrn_your_key_here
+# or
+Authorization: Bearer etrn_your_key_here</code></pre>
+
+  <h2 id="models">Available Models</h2>
+  <div class="model-grid">
+    <div class="model-card">
+      <span class="type">Image</span>
+      <h4>Nano Banana Pro</h4>
+      <p>Fast 4K image gen with physics simulation</p>
+      <div class="price">~$0.04/image</div>
+    </div>
+    <div class="model-card">
+      <span class="type">Image</span>
+      <h4>Flux Kontext</h4>
+      <p>Advanced image generation &amp; editing</p>
+      <div class="price">~$0.05/image</div>
+    </div>
+    <div class="model-card">
+      <span class="type">Image</span>
+      <h4>GPT-4o Image</h4>
+      <p>OpenAI image generation</p>
+      <div class="price">~$0.07/image</div>
+    </div>
+    <div class="model-card">
+      <span class="type">Video</span>
+      <h4>Kling 3.0</h4>
+      <p>Multi-shot video with element refs &amp; SFX</p>
+      <div class="price">$0.46-$1.43/video</div>
+    </div>
+    <div class="model-card">
+      <span class="type">Video</span>
+      <h4>Kling 2.6</h4>
+      <p>High-quality video with audio support</p>
+      <div class="price">$0.36-$1.17/video</div>
+    </div>
+    <div class="model-card">
+      <span class="type">Video</span>
+      <h4>Wan 2.6</h4>
+      <p>HD multi-shot video with native audio</p>
+      <div class="price">$0.39-$1.30/video</div>
+    </div>
+  </div>
+
+  <h2 id="pipelines">Pipelines</h2>
+  <p>Multi-model workflows in a single API call. Built for agents that need multiple outputs without managing 10+ API calls.</p>
+  <div class="pipeline-grid">
+    <div class="pipeline-card">
+      <h4>Product Shot</h4>
+      <p>3 professional product photos at different angles</p>
+      <span class="steps">3 steps &middot; ~$0.12</span>
+    </div>
+    <div class="pipeline-card">
+      <h4>Social Media Pack</h4>
+      <p>Images for Instagram (1:1), Stories (9:16), YouTube (16:9)</p>
+      <span class="steps">3 steps &middot; ~$0.12</span>
+    </div>
+    <div class="pipeline-card">
+      <h4>Video Ad</h4>
+      <p>Hero image → cinematic 5s video with sound</p>
+      <span class="steps">2 steps &middot; ~$0.76</span>
+    </div>
+    <div class="pipeline-card">
+      <h4>Thumbnail Pack</h4>
+      <p>4 YouTube thumbnail variations across models</p>
+      <span class="steps">4 steps &middot; ~$0.21</span>
+    </div>
+  </div>
+
+  <h2 id="endpoints">Endpoints</h2>
+
+  <div class="endpoint">
+    <span class="method post">POST</span><code>/v1/generate</code>
+    <p>Create an image or video generation task.</p>
+    <h3>Request Body</h3>
+    <table>
+      <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+      <tr><td><code>model</code></td><td>string</td><td>Yes</td><td>Model ID (see models above)</td></tr>
+      <tr><td><code>prompt</code></td><td>string</td><td>Yes</td><td>Text description of what to generate</td></tr>
+      <tr><td><code>cache</code></td><td>boolean</td><td>No</td><td>Enable prompt caching (default: true). Agents save money here.</td></tr>
+      <tr><td><code>callback_url</code></td><td>string</td><td>No</td><td>Webhook URL for completion notification</td></tr>
+      <tr><td><code>image_urls</code></td><td>string[]</td><td>No</td><td>Reference images (image-to-image/video)</td></tr>
+      <tr><td><code>aspect_ratio</code></td><td>string</td><td>No</td><td>"16:9", "9:16", "1:1" (default varies)</td></tr>
+      <tr><td><code>duration</code></td><td>number</td><td>No</td><td>Video length in seconds (3-15)</td></tr>
+      <tr><td><code>mode</code></td><td>string</td><td>No</td><td>"std" or "pro" (video quality)</td></tr>
+      <tr><td><code>sound</code></td><td>boolean</td><td>No</td><td>Include audio (video only)</td></tr>
+      <tr><td><code>resolution</code></td><td>string</td><td>No</td><td>"1K"/"4K" (image), "720p"/"1080p" (video)</td></tr>
+    </table>
+    <h3>Response</h3>
+    <pre><code>{
+  "code": 200,
+  "msg": "success",
+  "data": { "taskId": "task_abc123" },
+  "_cost": "$0.04",
+  "_budget_remaining": "$61.96",
+  "_cached": false
+}</code></pre>
+  </div>
+
+  <div class="endpoint">
+    <span class="method post">POST</span><code>/v1/pipelines/run</code>
+    <p>Run a multi-step pipeline. All tasks submitted in parallel.</p>
+    <h3>Request Body</h3>
+    <table>
+      <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+      <tr><td><code>pipeline</code></td><td>string</td><td>Yes</td><td>product-shot, social-media-pack, video-ad, thumbnail-pack</td></tr>
+      <tr><td><code>prompt</code></td><td>string</td><td>Yes</td><td>Base prompt for the pipeline</td></tr>
+    </table>
+  </div>
+
+  <div class="endpoint">
+    <span class="method get">GET</span><code>/v1/tasks/:task_id</code>
+    <p>Check the status of a generation task.</p>
+  </div>
+
+  <div class="endpoint">
+    <span class="method get">GET</span><code>/v1/tasks/:task_id/download</code>
+    <p>Get download URL for a completed task. URLs expire in 20 minutes.</p>
+  </div>
+
+  <div class="endpoint">
+    <span class="method get">GET</span><code>/v1/usage</code>
+    <p>Get your usage, budget remaining, cache savings, and recent activity. <em>(Authenticated)</em></p>
+  </div>
+
+  <div class="endpoint">
+    <span class="method get">GET</span><code>/v1/models</code>
+    <p>List all available models with pricing.</p>
+  </div>
+
+  <div class="endpoint">
+    <span class="method get">GET</span><code>/v1/pipelines</code>
+    <p>List all available pipelines.</p>
+  </div>
+
+  <div class="endpoint">
+    <span class="method get">GET</span><code>/v1/tiers</code>
+    <p>List pricing tiers and their limits.</p>
+  </div>
+
+  <h2>Smart Caching</h2>
+  <p>Every generation request is cached by default. If an agent sends the same prompt + model + parameters twice, the second request returns instantly at <strong>zero cost</strong>. Cache TTL is 1 hour.</p>
+  <p>Disable per-request with <code>"cache": false</code> in the request body.</p>
+  <p>Cached responses include <code>"_cached": true</code> and <code>"_saved": "$0.04"</code> so agents can track their savings.</p>
+
+  <h2 id="pricing">Pricing Tiers</h2>
+  <table>
+    <tr><th>Tier</th><th>Monthly</th><th>Credits</th><th>Rate Limit</th><th>Concurrent</th></tr>
+    <tr><td>Free</td><td>$0</td><td>$2.00</td><td>10/min</td><td>2</td></tr>
+    <tr><td>Starter</td><td>$29</td><td>$22.00</td><td>30/min</td><td>5</td></tr>
+    <tr><td>Builder</td><td>$79</td><td>$62.00</td><td>45/min</td><td>10</td></tr>
+    <tr><td>Scale</td><td>$199</td><td>$165.00</td><td>60/min</td><td>20</td></tr>
+    <tr><td>Enterprise</td><td>Custom</td><td>Custom</td><td>120/min</td><td>50</td></tr>
+  </table>
+
+  <h2>Errors</h2>
+  <table>
+    <tr><th>Code</th><th>Meaning</th></tr>
+    <tr><td>401</td><td>Missing or invalid API key</td></tr>
+    <tr><td>402</td><td>Monthly credit limit reached — upgrade tier</td></tr>
+    <tr><td>403</td><td>API key not authorized</td></tr>
+    <tr><td>429</td><td>Rate limit exceeded</td></tr>
+    <tr><td>500</td><td>Upstream generation error</td></tr>
+  </table>
+
+  <div class="cta">
+    <a class="btn" href="https://eternium.ai">Get Your API Key</a>
+    <a class="btn-outline" href="https://api.eternium.ai/dashboard">Dashboard</a>
+  </div>
+
+  <footer>
+    <p>&copy; 2026 Eternium LLC. All rights reserved.</p>
+  </footer>
+</div>
+
+<script>
+function showTab(tab) {
+  ['js', 'py', 'curl'].forEach(t => {
+    document.getElementById('code-' + t).style.display = t === tab ? 'block' : 'none';
+  });
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

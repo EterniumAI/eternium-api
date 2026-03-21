@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eternium API — Get Your Key</title>
+<style>
+  :root { --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e; --text: #e4e4ef; --muted: #8888a0; --accent: #6c63ff; --accent2: #a78bfa; --green: #22c55e; --red: #ef4444; --code-bg: #1a1a2e; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .container { max-width: 480px; width: 100%; padding: 2rem; }
+
+  h1 { font-size: 1.8rem; text-align: center; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; }
+  .subtitle { text-align: center; color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
+
+  /* Steps */
+  .steps { display: flex; justify-content: center; gap: 0.5rem; margin-bottom: 2rem; }
+  .step-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+  .step-dot.active { background: var(--accent); }
+  .step-dot.done { background: var(--green); }
+
+  /* Forms */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; }
+  label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.3rem; font-weight: 600; }
+  input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.75rem 1rem; border-radius: 8px; font-size: 1rem; margin-bottom: 1rem; outline: none; }
+  input:focus { border-color: var(--accent); }
+  .btn { width: 100%; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border: none; padding: 0.85rem; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; }
+  .btn:hover { opacity: 0.9; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .error { color: var(--red); font-size: 0.85rem; margin-bottom: 1rem; text-align: center; }
+  .link { text-align: center; margin-top: 1rem; font-size: 0.85rem; color: var(--muted); }
+  .link a { color: var(--accent); text-decoration: none; } .link a:hover { text-decoration: underline; }
+
+  /* Tier selection */
+  .tier-grid { display: grid; gap: 0.75rem; margin-bottom: 1.5rem; }
+  .tier-option { background: var(--bg); border: 2px solid var(--border); border-radius: 10px; padding: 1rem; cursor: pointer; transition: border-color 0.2s; }
+  .tier-option:hover { border-color: var(--accent); }
+  .tier-option.selected { border-color: var(--accent); background: rgba(108, 99, 255, 0.05); }
+  .tier-option .name { font-weight: 700; font-size: 1rem; }
+  .tier-option .price { color: var(--accent2); font-weight: 600; font-size: 0.9rem; }
+  .tier-option .detail { color: var(--muted); font-size: 0.8rem; margin-top: 0.25rem; }
+  .tier-option.free-tier .price { color: var(--green); }
+  .popular { position: relative; }
+  .popular::after { content: 'POPULAR'; position: absolute; top: -8px; right: 12px; background: var(--accent); color: #fff; font-size: 0.6rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+
+  /* Success */
+  .success-card { text-align: center; }
+  .success-card .key-display { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: var(--green); margin: 1rem 0; word-break: break-all; position: relative; cursor: pointer; }
+  .success-card .key-display:hover::after { content: 'Click to copy'; position: absolute; top: -24px; right: 0; font-size: 0.7rem; color: var(--muted); }
+  .success-card .warning { color: var(--muted); font-size: 0.8rem; margin: 0.5rem 0 1.5rem; }
+  .btn-group { display: flex; gap: 0.5rem; }
+  .btn-outline { width: 100%; background: transparent; border: 1px solid var(--accent); color: var(--accent); padding: 0.75rem; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+  .btn-outline:hover { background: rgba(108, 99, 255, 0.1); }
+
+  footer { text-align: center; margin-top: 2rem; color: var(--muted); font-size: 0.75rem; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Step 1: Create Account -->
+  <div id="step-1">
+    <h1>Eternium API</h1>
+    <p class="subtitle">AI generation built for agents. Get your key in 60 seconds.</p>
+    <div class="steps"><span class="step-dot active"></span><span class="step-dot"></span><span class="step-dot"></span></div>
+    <div class="card">
+      <div id="signup-error" class="error" style="display:none;"></div>
+      <label>Email</label>
+      <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
+      <label>Password</label>
+      <input id="password" type="password" placeholder="Min 8 characters" autocomplete="new-password">
+      <label>Name (optional)</label>
+      <input id="name" type="text" placeholder="Your name or company">
+      <button class="btn" onclick="signup()">Create Account</button>
+      <div class="link">Already have an account? <a href="#" onclick="showLogin()">Sign in</a></div>
+    </div>
+  </div>
+
+  <!-- Step 1b: Login -->
+  <div id="step-login" style="display:none;">
+    <h1>Welcome Back</h1>
+    <p class="subtitle">Sign in to manage your API key.</p>
+    <div class="card">
+      <div id="login-error" class="error" style="display:none;"></div>
+      <label>Email</label>
+      <input id="login-email" type="email" placeholder="you@company.com" autocomplete="email">
+      <label>Password</label>
+      <input id="login-password" type="password" placeholder="Your password" autocomplete="current-password">
+      <button class="btn" onclick="login()">Sign In</button>
+      <div class="link"><a href="#" onclick="showSignup()">Create an account</a></div>
+    </div>
+  </div>
+
+  <!-- Step 2: Choose Tier -->
+  <div id="step-2" style="display:none;">
+    <h1>Choose Your Plan</h1>
+    <p class="subtitle">Start free. Upgrade anytime.</p>
+    <div class="steps"><span class="step-dot done"></span><span class="step-dot active"></span><span class="step-dot"></span></div>
+    <div class="card">
+      <div class="tier-grid">
+        <div class="tier-option free-tier selected" data-tier="free" onclick="selectTier(this)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;">
+            <span class="name">Free</span><span class="price">$0/mo</span>
+          </div>
+          <div class="detail">$2.00 credits &middot; 10 req/min &middot; Perfect for testing</div>
+        </div>
+        <div class="tier-option" data-tier="starter" onclick="selectTier(this)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;">
+            <span class="name">Starter</span><span class="price">$29/mo</span>
+          </div>
+          <div class="detail">$22.00 credits &middot; 30 req/min &middot; Hobbyists & builders</div>
+        </div>
+        <div class="tier-option popular" data-tier="builder" onclick="selectTier(this)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;">
+            <span class="name">Builder</span><span class="price">$79/mo</span>
+          </div>
+          <div class="detail">$62.00 credits &middot; 45 req/min &middot; Indie devs & small agents</div>
+        </div>
+        <div class="tier-option" data-tier="scale" onclick="selectTier(this)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;">
+            <span class="name">Scale</span><span class="price">$199/mo</span>
+          </div>
+          <div class="detail">$165.00 credits &middot; 60 req/min &middot; Teams & production</div>
+        </div>
+      </div>
+      <button class="btn" onclick="chooseTier()">Continue</button>
+    </div>
+  </div>
+
+  <!-- Step 3: Success -->
+  <div id="step-3" style="display:none;">
+    <h1>You're In</h1>
+    <p class="subtitle">Your API key is ready. Keep it safe — it won't be shown again.</p>
+    <div class="steps"><span class="step-dot done"></span><span class="step-dot done"></span><span class="step-dot active"></span></div>
+    <div class="card success-card">
+      <div class="key-display" id="api-key-display" onclick="copyKey()">—</div>
+      <div class="warning">Save this key now. You can regenerate it later, but the current key will be invalidated.</div>
+      <div class="btn-group">
+        <a class="btn" href="/docs" style="text-align:center;text-decoration:none;">Read Docs</a>
+        <a class="btn-outline" href="/dashboard" style="text-align:center;text-decoration:none;">Dashboard</a>
+      </div>
+    </div>
+  </div>
+
+  <footer>&copy; 2026 Eternium LLC</footer>
+</div>
+
+<script>
+const BASE = window.location.origin;
+let sessionToken = '';
+let selectedTier = 'free';
+let generatedKey = '';
+
+function showError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function showStep(n) {
+  ['step-1', 'step-login', 'step-2', 'step-3'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+  document.getElementById('step-' + n).style.display = 'block';
+}
+
+function showLogin() { showStep('login'); }
+function showSignup() { showStep('1'); }
+
+async function signup() {
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const name = document.getElementById('name').value.trim();
+
+  if (!email || !password) return showError('signup-error', 'Email and password required.');
+  if (password.length < 8) return showError('signup-error', 'Password must be at least 8 characters.');
+
+  showError('signup-error', '');
+  const btn = document.querySelector('#step-1 .btn');
+  btn.disabled = true;
+  btn.textContent = 'Creating...';
+
+  try {
+    const res = await fetch(`${BASE}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, name }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Signup failed');
+    sessionToken = data.token;
+    showStep('2');
+  } catch (e) {
+    showError('signup-error', e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Create Account';
+  }
+}
+
+async function login() {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+
+  if (!email || !password) return showError('login-error', 'Email and password required.');
+  showError('login-error', '');
+
+  const btn = document.querySelector('#step-login .btn');
+  btn.disabled = true;
+  btn.textContent = 'Signing in...';
+
+  try {
+    const res = await fetch(`${BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Login failed');
+    sessionToken = data.token;
+    if (data.api_key) {
+      // Already has a key — go to dashboard
+      window.location.href = '/dashboard';
+    } else {
+      showStep('2');
+    }
+  } catch (e) {
+    showError('login-error', e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+}
+
+function selectTier(el) {
+  document.querySelectorAll('.tier-option').forEach(t => t.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedTier = el.dataset.tier;
+}
+
+async function chooseTier() {
+  const btn = document.querySelector('#step-2 .btn');
+  btn.disabled = true;
+
+  if (selectedTier !== 'free') {
+    // Redirect to Stripe Checkout
+    btn.textContent = 'Redirecting to checkout...';
+    try {
+      const res = await fetch(`${BASE}/auth/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+        body: JSON.stringify({ tier: selectedTier }),
+      });
+      const data = await res.json();
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+        return;
+      }
+      throw new Error(data.error || 'Could not create checkout session');
+    } catch (e) {
+      btn.textContent = 'Continue';
+      btn.disabled = false;
+      alert(e.message);
+      return;
+    }
+  }
+
+  // Free tier — generate key immediately
+  btn.textContent = 'Generating key...';
+  try {
+    const res = await fetch(`${BASE}/auth/provision-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+      body: JSON.stringify({ tier: 'free' }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Key generation failed');
+    generatedKey = data.api_key;
+    document.getElementById('api-key-display').textContent = generatedKey;
+    showStep('3');
+  } catch (e) {
+    btn.textContent = 'Continue';
+    btn.disabled = false;
+    alert(e.message);
+  }
+}
+
+function copyKey() {
+  navigator.clipboard.writeText(generatedKey).then(() => {
+    const el = document.getElementById('api-key-display');
+    el.style.borderColor = 'var(--green)';
+    setTimeout(() => el.style.borderColor = 'var(--border)', 1500);
+  });
+}
+
+// Handle Stripe success redirect
+const params = new URLSearchParams(window.location.search);
+if (params.get('checkout') === 'success' && params.get('session_id')) {
+  // After Stripe payment, provision key
+  (async () => {
+    try {
+      const res = await fetch(`${BASE}/auth/stripe-success?session_id=${params.get('session_id')}`);
+      const data = await res.json();
+      if (data.api_key) {
+        generatedKey = data.api_key;
+        document.getElementById('api-key-display').textContent = generatedKey;
+        showStep('3');
+      }
+    } catch (e) { console.error(e); }
+  })();
+}
+</script>
+</body>
+</html>
