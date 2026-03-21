@@ -194,8 +194,14 @@ curl https://api.eternium.ai/v1/tasks/TASK_ID/download \
 </div>
 
 <script>
-const BASE = 'https://api.eternium.ai';
+const BASE = window.location.origin;
 let currentKey = '';
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = String(s == null ? '' : s);
+  return d.innerHTML;
+}
 
 function authenticate() {
   const key = document.getElementById('api-key-input').value.trim();
@@ -260,7 +266,7 @@ function showDashboard(data) {
   } else {
     tbody.innerHTML = tasks.map(t => `
       <tr>
-        <td>${t.model}</td>
+        <td>${esc(t.model)}</td>
         <td>$${(t.cost || 0).toFixed(4)}</td>
         <td>${t.cached ? '<span class="cached-badge">CACHED</span>' : '—'}</td>
         <td>${timeAgo(t.ts)}</td>

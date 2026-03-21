@@ -21,23 +21,22 @@ ADMIN_EMAIL = "ty@eternium.ai"
 
 [[kv_namespaces]]
 binding = "API_KEYS"
-id = "REPLACE_WITH_API_KEYS_NAMESPACE_ID"
+id = "7a99702bb5a7469797a66c2fcd051db2"
 
 [[kv_namespaces]]
 binding = "USERS"
-id = "REPLACE_WITH_USERS_NAMESPACE_ID"
+id = "60a2ff86e6fb45d7a4f7b34a9f7db6cf"
 
 [[kv_namespaces]]
 binding = "USAGE"
-id = "REPLACE_WITH_USAGE_NAMESPACE_ID"
+id = "4495ba1e13004534b0e40dd4ad9a35fd"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "REPLACE_WITH_CACHE_NAMESPACE_ID"
+id = "ca36ec423ccc4eb2b3d67ef1a3d202d5"
 
-# ── Secrets (set via dashboard or CLI) ───────────────────────────
-# wrangler secret put KIE_API_KEY
-# wrangler secret put STRIPE_SECRET_KEY
-# wrangler secret put STRIPE_WEBHOOK_SECRET
-# wrangler secret put JWT_SECRET
-# wrangler secret put API_KEYS_JSON    # Fallback if KV not set up yet
+# ── Secrets (set via CLI: wrangler secret put <NAME>) ────────────
+# KIE_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, JWT_SECRET
+
+[assets]
+directory = "./public"

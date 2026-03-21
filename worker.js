@@ -250,13 +250,15 @@ function checkRateLimit(apiKey, limit = 30) {
 
 // ── CORS ────────────────────────────────────────────────────────
 function corsHeaders(origin) {
-	const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : '*';
-	return {
-		'Access-Control-Allow-Origin': allowed,
+	const headers = {
 		'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, DELETE',
 		'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
 		'Access-Control-Max-Age': '86400',
 	};
+	if (ALLOWED_ORIGINS.includes(origin)) {
+		headers['Access-Control-Allow-Origin'] = origin;
+	}
+	return headers;
 }
 
 // ── Kie.ai proxy ────────────────────────────────────────────────
@@ -488,7 +490,7 @@ export default {
 				service: 'Eternium API',
 				version: API_VERSION,
 				status: 'operational',
-				docs: 'https://api.eternium.ai/docs',
+				docs: 'https://api.eternium.ai/v1/docs',
 				models: Object.keys(MODELS).length,
 				pipelines: Object.keys(PIPELINES).length,
 			}, 200, cors);
@@ -512,7 +514,7 @@ export default {
 			return json({ tiers: TIERS }, 200, cors);
 		}
 
-		if (url.pathname === '/docs' && request.method === 'GET') {
+		if (url.pathname === '/v1/docs' && request.method === 'GET') {
 			return json({
 				name: 'Eternium API',
 				version: API_VERSION,

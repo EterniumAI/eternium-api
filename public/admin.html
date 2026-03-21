@@ -137,6 +137,12 @@
 const BASE = window.location.origin;
 let adminKey = '';
 
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = String(s == null ? '' : s);
+  return d.innerHTML;
+}
+
 function adminLogin() {
   adminKey = document.getElementById('admin-key').value.trim();
   if (!adminKey) return;
@@ -181,7 +187,7 @@ async function loadAll() {
     if (alerts.length > 0) {
       document.getElementById('alerts-section').style.display = 'block';
       document.getElementById('alerts').innerHTML = alerts.map(a =>
-        `<div class="alert ${a.level}"><div class="title">${a.title}</div>${a.message}</div>`
+        `<div class="alert ${esc(a.level)}"><div class="title">${esc(a.title)}</div>${esc(a.message)}</div>`
       ).join('');
     }
 
@@ -191,18 +197,18 @@ async function loadAll() {
       ? '<tr><td colspan="9" class="empty">No users yet.</td></tr>'
       : users.map(u => `
         <tr>
-          <td>${u.email}</td>
-          <td>${u.name || '—'}</td>
-          <td><span class="badge badge-${u.tier}">${u.tier}</span></td>
+          <td>${esc(u.email)}</td>
+          <td>${esc(u.name || '—')}</td>
+          <td><span class="badge badge-${esc(u.tier)}">${esc(u.tier)}</span></td>
           <td>$${(u.spent || 0).toFixed(2)}</td>
           <td>${u.generations || 0}</td>
           <td>${u.cached || 0}</td>
-          <td style="font-family:monospace;font-size:0.75rem;color:var(--muted);">${u.key ? u.key.slice(0, 10) + '...' : '—'}</td>
+          <td style="font-family:monospace;font-size:0.75rem;color:var(--muted);">${u.key ? esc(u.key.slice(0, 10)) + '...' : '—'}</td>
           <td>${u.created ? new Date(u.created).toLocaleDateString() : '—'}</td>
           <td>
             ${u.active !== false
-              ? `<button class="action-btn" onclick="revokeUser('${u.email}')">Revoke</button>`
-              : `<button class="action-btn activate" onclick="activateUser('${u.email}')">Activate</button>`}
+              ? `<button class="action-btn" onclick="revokeUser('${esc(u.email)}')">Revoke</button>`
+              : `<button class="action-btn activate" onclick="activateUser('${esc(u.email)}')">Activate</button>`}
           </td>
         </tr>
       `).join('');
@@ -213,7 +219,7 @@ async function loadAll() {
       ? '<tr><td colspan="5" class="empty">No usage data yet.</td></tr>'
       : models.map(m => {
         const mgn = m.revenue > 0 ? ((1 - m.cost / m.revenue) * 100).toFixed(0) : '0';
-        return `<tr><td>${m.model}</td><td>${m.count}</td><td>$${m.revenue.toFixed(2)}</td><td>$${m.cost.toFixed(2)}</td><td>${mgn}%</td></tr>`;
+        return `<tr><td>${esc(m.model)}</td><td>${m.count}</td><td>$${m.revenue.toFixed(2)}</td><td>$${m.cost.toFixed(2)}</td><td>${mgn}%</td></tr>`;
       }).join('');
 
     // Health

@@ -17,17 +17,38 @@
 // ── Tier → Stripe Price ID mapping ──────────────────────────────
 // Create these products/prices in Stripe Dashboard, then paste IDs here.
 const STRIPE_PRICES = {
-	starter: 'price_REPLACE_STARTER',    // $29/mo
-	builder: 'price_REPLACE_BUILDER',    // $79/mo
-	scale: 'price_REPLACE_SCALE',        // $199/mo
+	starter: 'price_1TDYXRIyAjP5WeLpNtfCtiCB',    // $29/mo
+	builder: 'price_1TDYXTIyAjP5WeLpVz7mCzG6',    // $79/mo
+	scale: 'price_1TDYXVIyAjP5WeLpWo6KL0oE',      // $199/mo
 };
 
 const MRR_VALUES = { free: 0, starter: 29, builder: 79, scale: 199, enterprise: 0 };
 
 // ── Crypto helpers ──────────────────────────────────────────────
-async function hashPassword(password) {
-	const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
-	return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+async function hashPassword(password, existingSalt = null) {
+	const salt = existingSalt || crypto.getRandomValues(new Uint8Array(16));
+	const keyMaterial = await crypto.subtle.importKey(
+		'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']
+	);
+	const hash = await crypto.subtle.deriveBits(
+		{ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+		keyMaterial, 256
+	);
+	const saltHex = Array.from(new Uint8Array(salt)).map(b => b.toString(16).padStart(2, '0')).join('');
+	const hashHex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+	return `${saltHex}:${hashHex}`;
+}
+
+async function verifyPassword(password, storedHash) {
+	if (!storedHash || !storedHash.includes(':')) {
+		const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
+		const legacyHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+		return legacyHash === storedHash;
+	}
+	const [saltHex] = storedHash.split(':');
+	const salt = new Uint8Array(saltHex.match(/.{2}/g).map(b => parseInt(b, 16)));
+	const newHash = await hashPassword(password, salt);
+	return newHash === storedHash;
 }
 
 function generateApiKey() {
@@ -172,7 +193,8 @@ export async function handleSignup(request, env) {
 
 	await saveUser(env, user);
 
-	const secret = env.JWT_SECRET || 'eternium-jwt-secret-change-me';
+	if (!env.JWT_SECRET) return { error: 'Server misconfigured: JWT_SECRET not set', code: 500 };
+	const secret = env.JWT_SECRET;
 	const token = await signJWT({
 		sub: user.email,
 		iat: Math.floor(Date.now() / 1000),
@@ -193,11 +215,12 @@ export async function handleLogin(request, env) {
 	const user = await getUser(env, email);
 	if (!user) return { error: 'Invalid credentials', code: 401 };
 
-	const hash = await hashPassword(password);
-	if (hash !== user.passwordHash) return { error: 'Invalid credentials', code: 401 };
+	const valid = await verifyPassword(password, user.passwordHash);
+	if (!valid) return { error: 'Invalid credentials', code: 401 };
 	if (user.active === false) return { error: 'Account suspended', code: 403 };
 
-	const secret = env.JWT_SECRET || 'eternium-jwt-secret-change-me';
+	if (!env.JWT_SECRET) return { error: 'Server misconfigured: JWT_SECRET not set', code: 500 };
+	const secret = env.JWT_SECRET;
 	const token = await signJWT({
 		sub: user.email,
 		iat: Math.floor(Date.now() / 1000),
@@ -210,7 +233,8 @@ export async function handleLogin(request, env) {
 export async function handleCheckout(request, env) {
 	const authHeader = request.headers.get('Authorization') || '';
 	const token = authHeader.replace('Bearer ', '');
-	const secret = env.JWT_SECRET || 'eternium-jwt-secret-change-me';
+	if (!env.JWT_SECRET) return { error: 'Server misconfigured: JWT_SECRET not set', code: 500 };
+	const secret = env.JWT_SECRET;
 	const payload = await verifyJWT(token, secret);
 	if (!payload) return { error: 'Not authenticated', code: 401 };
 
@@ -259,7 +283,8 @@ export async function handleCheckout(request, env) {
 export async function handleProvisionKey(request, env) {
 	const authHeader = request.headers.get('Authorization') || '';
 	const token = authHeader.replace('Bearer ', '');
-	const secret = env.JWT_SECRET || 'eternium-jwt-secret-change-me';
+	if (!env.JWT_SECRET) return { error: 'Server misconfigured: JWT_SECRET not set', code: 500 };
+	const secret = env.JWT_SECRET;
 	const payload = await verifyJWT(token, secret);
 	if (!payload) return { error: 'Not authenticated', code: 401 };
 
@@ -321,10 +346,11 @@ export async function handleStripeWebhook(request, env) {
 	const body = await request.text();
 	const sig = request.headers.get('stripe-signature');
 
-	if (env.STRIPE_WEBHOOK_SECRET && sig) {
-		const valid = await verifyStripeSignature(body, sig, env.STRIPE_WEBHOOK_SECRET);
-		if (!valid) return { error: 'Invalid signature', code: 400 };
+	if (!env.STRIPE_WEBHOOK_SECRET || !sig) {
+		return { error: 'Webhook verification not configured', code: 500 };
 	}
+	const sigValid = await verifyStripeSignature(body, sig, env.STRIPE_WEBHOOK_SECRET);
+	if (!sigValid) return { error: 'Invalid signature', code: 400 };
 
 	const event = JSON.parse(body);
 
