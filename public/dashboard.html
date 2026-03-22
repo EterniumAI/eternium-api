@@ -239,22 +239,24 @@ function showDashboard(data) {
 
   document.getElementById('key-name').textContent = maskedKey;
   document.getElementById('tier-badge').textContent = data.tier_name || data.tier || 'Free';
-  document.getElementById('stat-spent').textContent = data.spent || '$0.00';
-  document.getElementById('stat-remaining').textContent = data.remaining || '$0.00';
-  document.getElementById('stat-remaining-sub').textContent = `of ${data.monthly_limit || '$0.00'}`;
+  const spent = data.spent || 0;
+  const limit = data.monthly_limit || 1;
+  const remaining = data.remaining || 0;
+
+  document.getElementById('stat-spent').textContent = spent.toLocaleString() + ' cr';
+  document.getElementById('stat-remaining').textContent = remaining.toLocaleString() + ' cr';
+  document.getElementById('stat-remaining-sub').textContent = `of ${limit.toLocaleString()} credits`;
   document.getElementById('stat-generations').textContent = data.generations || 0;
-  document.getElementById('stat-cache').textContent = data.cache_savings || '$0.00';
-  document.getElementById('stat-cache-sub').textContent = `${data.cached_hits || 0} cached responses`;
+  document.getElementById('stat-cache').textContent = (data.cached_hits || 0) + ' hits';
+  document.getElementById('stat-cache-sub').textContent = `${data.cached_hits || 0} at 0 credits`;
 
   // Budget bar
-  const spent = parseFloat((data.spent || '$0').replace('$', ''));
-  const limit = parseFloat((data.monthly_limit || '$1').replace('$', ''));
   const pct = Math.min((spent / limit) * 100, 100);
   const fill = document.getElementById('budget-fill');
   fill.style.width = pct + '%';
   fill.style.background = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--green)';
-  document.getElementById('budget-spent').textContent = `${data.spent || '$0.00'} used`;
-  document.getElementById('budget-limit').textContent = `${data.monthly_limit || '$0.00'} limit`;
+  document.getElementById('budget-spent').textContent = `${spent.toLocaleString()} credits used`;
+  document.getElementById('budget-limit').textContent = `${limit.toLocaleString()} credit limit`;
 
   // Key display in code
   document.querySelectorAll('.key-display').forEach(el => el.textContent = maskedKey);
@@ -268,7 +270,7 @@ function showDashboard(data) {
     tbody.innerHTML = tasks.map(t => `
       <tr>
         <td>${esc(t.model)}</td>
-        <td>$${(t.cost || 0).toFixed(4)}</td>
+        <td>${t.credits || t.cost || 0} cr</td>
         <td>${t.cached ? '<span class="cached-badge">CACHED</span>' : '—'}</td>
         <td>${timeAgo(t.ts)}</td>
       </tr>
