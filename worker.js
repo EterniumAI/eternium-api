@@ -47,16 +47,17 @@ const KIE_COSTS = {
 // ── Our pricing (35% markup on images, 30% on video) ────────────
 const MARKUP = { image: 1.35, video: 1.30 };
 
-function getGenerationCost(model, params = {}) {
+function getGenerationCost(model, params = {}, keyTier = null) {
 	const base = KIE_COSTS[model];
 	if (!base) return 0;
-	if (typeof base === 'number') return +(base * MARKUP.image).toFixed(4);
+	const noMarkup = keyTier === 'internal';
+	if (typeof base === 'number') return +(base * (noMarkup ? 1 : MARKUP.image)).toFixed(4);
 	// Video pricing by mode/resolution and duration
 	const mode = params.mode || params.resolution || Object.keys(base)[0];
 	const duration = params.duration || 5;
 	const tier = base[mode] || base[Object.keys(base)[0]];
 	const raw = tier[duration] || tier[Object.keys(tier)[0]];
-	return +(raw * MARKUP.video).toFixed(4);
+	return +(raw * (noMarkup ? 1 : MARKUP.video)).toFixed(4);
 }
 
 // ── Tier definitions ────────────────────────────────────────────
@@ -66,6 +67,7 @@ const TIERS = {
 	builder:    { name: 'Builder',    monthlyCredits: 62.00,  rateLimit: 45,  concurrentTasks: 10 },
 	scale:      { name: 'Scale',      monthlyCredits: 165.00, rateLimit: 60,  concurrentTasks: 20 },
 	enterprise: { name: 'Enterprise', monthlyCredits: 999.00, rateLimit: 120, concurrentTasks: 50 },
+	internal:   { name: 'Internal',   monthlyCredits: 9999.00, rateLimit: 200, concurrentTasks: 100 },
 };
 
 // ── Supported models ────────────────────────────────────────────
@@ -341,7 +343,7 @@ async function handleGenerate(body, env, keyData) {
 	}
 	if (!prompt) return { error: 'prompt is required', code: 400 };
 
-	const cost = getGenerationCost(model, params);
+	const cost = getGenerationCost(model, params, keyData.tier);
 
 	// Budget check
 	const budget = await checkBudget(env, keyData.key, keyData.tier, cost);
@@ -398,7 +400,7 @@ async function handlePipeline(body, env, keyData) {
 
 	for (const step of pipelineDef.steps) {
 		const stepParams = { ...params, ...step.overrides };
-		const cost = getGenerationCost(step.model, stepParams);
+		const cost = getGenerationCost(step.model, stepParams, keyData.tier);
 		totalCost += cost;
 	}
 
@@ -418,7 +420,7 @@ async function handlePipeline(body, env, keyData) {
 		const stepParams = { ...params, ...step.overrides };
 		const kieBody = buildKieBody(step.model, stepPrompt, stepParams);
 		const result = await kieRequest('/jobs/createTask', kieBody, env);
-		const cost = getGenerationCost(step.model, stepParams);
+		const cost = getGenerationCost(step.model, stepParams, keyData.tier);
 		await trackUsage(env, keyData.key, cost, step.model, false);
 		tasks.push({
 			model: step.model,

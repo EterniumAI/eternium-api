@@ -152,7 +152,7 @@ async function provisionKey(env, email, tier, name) {
 		email: email.toLowerCase(),
 		name: name || email.split('@')[0],
 		tier: tier || 'free',
-		rateLimit: { free: 10, starter: 30, builder: 45, scale: 60, enterprise: 120 }[tier] || 10,
+		rateLimit: { free: 10, starter: 30, builder: 45, scale: 60, enterprise: 120, internal: 200 }[tier] || 10,
 		createdAt: new Date().toISOString(),
 	};
 
@@ -388,7 +388,7 @@ export async function handleStripeWebhook(request, env) {
 						const keyData = await env.API_KEYS.get(`key:${user.apiKey}`, 'json');
 						if (keyData) {
 							keyData.tier = newTier;
-							keyData.rateLimit = { free: 10, starter: 30, builder: 45, scale: 60, enterprise: 120 }[newTier] || 10;
+							keyData.rateLimit = { free: 10, starter: 30, builder: 45, scale: 60, enterprise: 120, internal: 200 }[newTier] || 10;
 							await env.API_KEYS.put(`key:${user.apiKey}`, JSON.stringify(keyData));
 						}
 					}
@@ -532,7 +532,7 @@ export async function handleAdminActivate(email, env) {
 			email: user.email,
 			name: user.name,
 			tier: user.tier,
-			rateLimit: { free: 10, starter: 30, builder: 45, scale: 60, enterprise: 120 }[user.tier] || 10,
+			rateLimit: { free: 10, starter: 30, builder: 45, scale: 60, enterprise: 120, internal: 200 }[user.tier] || 10,
 			createdAt: user.createdAt,
 		}));
 	}
