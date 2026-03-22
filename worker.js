@@ -487,7 +487,7 @@ export default {
 
 		// ── Public routes ────────────────────────────────────────────
 
-		if (url.pathname === '/' || url.pathname === '/health') {
+		if (url.pathname === '/health') {
 			return json({
 				service: 'Eternium API',
 				version: API_VERSION,

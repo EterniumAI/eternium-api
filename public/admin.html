@@ -4,22 +4,23 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Eternium API — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e; --text: #e4e4ef; --muted: #8888a0; --accent: #6c63ff; --accent2: #a78bfa; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --code-bg: #1a1a2e; }
+  :root { --bg: #050505; --surface: #0a0a0a; --border: rgba(255,255,255,0.1); --text: #e8e8e8; --muted: #7a8ba0; --accent: #18b5f0; --accent2: #0d52bc; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --code-bg: #080c10; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+  body { font-family: 'Montserrat', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
   .container { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
 
   /* Auth */
   #admin-auth { text-align: center; padding: 6rem 0; }
-  #admin-auth h1 { font-size: 1.5rem; color: var(--accent2); margin-bottom: 1rem; }
+  #admin-auth h1 { font-size: 1.5rem; color: var(--accent); margin-bottom: 1rem; }
   #admin-auth input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.75rem; border-radius: 8px; width: 280px; font-size: 1rem; }
   #admin-auth button { background: var(--accent); color: #fff; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-weight: 600; margin-left: 0.5rem; }
 
   /* Header */
   #admin-panel { display: none; }
   header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem; }
-  header h1 { font-size: 1.3rem; color: var(--accent2); }
+  header h1 { font-size: 1.3rem; color: var(--accent); }
   .refresh { background: var(--surface); border: 1px solid var(--border); color: var(--muted); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
   .refresh:hover { border-color: var(--accent); color: var(--accent); }
 

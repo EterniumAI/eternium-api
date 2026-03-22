@@ -4,15 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Eternium API — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e; --text: #e4e4ef; --muted: #8888a0; --accent: #6c63ff; --accent2: #a78bfa; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --code-bg: #1a1a2e; }
+  :root { --bg: #050505; --surface: #0a0a0a; --border: rgba(255,255,255,0.1); --text: #e8e8e8; --muted: #7a8ba0; --accent: #18b5f0; --accent2: #0d52bc; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --code-bg: #080c10; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+  body { font-family: 'Montserrat', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
   .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
 
   /* Auth */
   #auth-screen { text-align: center; padding: 6rem 0; }
-  #auth-screen h1 { font-size: 2rem; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 1rem; }
+  #auth-screen h1 { font-size: 2rem; font-weight: 800; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 1rem; }
   #auth-screen input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.75rem 1rem; border-radius: 8px; width: 320px; font-size: 1rem; margin-bottom: 1rem; display: block; margin-left: auto; margin-right: auto; }
   #auth-screen button { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border: none; padding: 0.75rem 2rem; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 600; }
   #auth-screen button:hover { opacity: 0.9; }
@@ -21,7 +22,7 @@
   /* Dashboard */
   #dashboard { display: none; }
   header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
-  header h1 { font-size: 1.5rem; color: var(--accent2); }
+  header h1 { font-size: 1.5rem; color: var(--accent); }
   .tier-badge { background: var(--accent); color: #fff; font-size: 0.75rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 9999px; }
   .logout { background: none; border: 1px solid var(--border); color: var(--muted); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
   .logout:hover { border-color: var(--red); color: var(--red); }

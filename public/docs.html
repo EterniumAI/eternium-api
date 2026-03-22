@@ -4,16 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Eternium API — Documentation</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e; --text: #e4e4ef; --muted: #8888a0; --accent: #6c63ff; --accent2: #a78bfa; --green: #22c55e; --code-bg: #1a1a2e; }
+  :root { --bg: #050505; --surface: #0a0a0a; --border: rgba(255,255,255,0.1); --text: #e8e8e8; --muted: #7a8ba0; --accent: #18b5f0; --accent2: #0d52bc; --green: #22c55e; --code-bg: #080c10; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+  body { font-family: 'Montserrat', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
   .container { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
   nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; border-bottom: 1px solid var(--border); margin-bottom: 2rem; }
   nav a { color: var(--muted); font-size: 0.9rem; margin-left: 1.5rem; } nav a:hover { color: var(--text); text-decoration: none; }
-  nav .logo { font-weight: 700; font-size: 1.1rem; color: var(--accent2); }
+  nav .logo { font-weight: 800; font-size: 1.1rem; color: var(--accent); }
   header { text-align: center; padding: 3rem 0 2.5rem; }
-  header h1 { font-size: 2.5rem; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  header h1 { font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
   header p { color: var(--muted); font-size: 1.15rem; margin-top: 0.5rem; }
   .badge { display: inline-block; background: var(--green); color: #000; font-size: 0.75rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 9999px; margin-top: 1rem; }
   .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }
@@ -21,7 +22,7 @@
   .feature .icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
   .feature h4 { font-size: 0.95rem; margin-bottom: 0.25rem; }
   .feature p { font-size: 0.8rem; }
-  h2 { font-size: 1.4rem; margin: 2.5rem 0 1rem; color: var(--accent2); }
+  h2 { font-size: 1.4rem; margin: 2.5rem 0 1rem; color: var(--accent); }
   h3 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   p, li { color: var(--muted); }
   a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
@@ -64,7 +65,8 @@
       <a href="#endpoints">Endpoints</a>
       <a href="#sdks">SDKs</a>
       <a href="#pricing">Pricing</a>
-      <a href="https://api.eternium.ai/dashboard">Dashboard</a>
+      <a href="/">Home</a>
+      <a href="/dashboard">Dashboard</a>
     </div>
   </nav>
 
@@ -331,8 +333,8 @@ Authorization: Bearer etrn_your_key_here</code></pre>
   </table>
 
   <div class="cta">
-    <a class="btn" href="https://eternium.ai">Get Your API Key</a>
-    <a class="btn-outline" href="https://api.eternium.ai/dashboard">Dashboard</a>
+    <a class="btn" href="/signup">Get Your API Key</a>
+    <a class="btn-outline" href="/dashboard">Dashboard</a>
   </div>
 
   <footer>
