@@ -5,121 +5,152 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Eternium API — AI Generation Built for Agents</title>
 <meta name="description" content="One API key. Best AI models. Intelligent caching. Generate images and video with SDKs that handle everything.">
+<link rel="icon" href="/assets/eternium-icon.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #050505; --surface: #0a0a0a; --glass: rgba(255,255,255,0.04);
-    --border: rgba(255,255,255,0.08); --border-bright: rgba(255,255,255,0.14);
-    --text: #e8e8e8; --muted: #7a8ba0; --cyan: #18b5f0; --cobalt: #0d52bc;
-    --glow: #0ef; --green: #22c55e; --code-bg: #080c10;
+    --bg: #050505; --surface: #0a0a0a;
+    --glass: rgba(255,255,255,0.03); --glass-hover: rgba(255,255,255,0.06);
+    --border: rgba(255,255,255,0.07); --border-bright: rgba(255,255,255,0.13);
+    --text: #e8e8e8; --dim: #a0aab8; --muted: #5e6d80;
+    --cyan: #18b5f0; --cobalt: #0d52bc; --glow: #0ef; --green: #22c55e;
+    --code-bg: #060a0e;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Montserrat', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; overflow-x: hidden; }
+  html { scroll-behavior: smooth; }
+  body { font-family: 'Montserrat', -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
 
-  /* Grain overlay */
-  body::before { content: ''; position: fixed; inset: 0; z-index: 9999; pointer-events: none; opacity: 0.015;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 2rem; }
 
-  .container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; }
-
-  /* Nav */
-  nav { position: sticky; top: 0; z-index: 100; background: rgba(5,5,5,0.85); backdrop-filter: blur(20px); border-bottom: 1px solid var(--border); }
-  nav .inner { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 0; max-width: 1100px; margin: 0 auto; padding-left: 1.5rem; padding-right: 1.5rem; }
-  .logo { font-weight: 800; font-size: 1.1rem; color: var(--cyan); letter-spacing: -0.02em; }
-  .nav-links { display: flex; gap: 1.5rem; align-items: center; }
-  .nav-links a { color: var(--muted); font-size: 0.85rem; font-weight: 500; text-decoration: none; transition: color 0.2s; }
+  /* ── Nav ─────────────────────────────────────────── */
+  nav { position: sticky; top: 0; z-index: 100; background: rgba(5,5,5,0.8); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border-bottom: 1px solid var(--border); }
+  nav .inner { display: flex; justify-content: space-between; align-items: center; max-width: 1080px; margin: 0 auto; padding: 0.7rem 2rem; }
+  .nav-brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; }
+  .nav-brand img { height: 26px; width: auto; }
+  .nav-brand span { font-weight: 800; font-size: 0.95rem; color: var(--text); letter-spacing: -0.01em; }
+  .nav-links { display: flex; gap: 2rem; align-items: center; }
+  .nav-links a { color: var(--muted); font-size: 0.8rem; font-weight: 500; text-decoration: none; letter-spacing: 0.01em; transition: color 0.2s; }
   .nav-links a:hover { color: var(--text); }
-  .nav-cta { background: var(--cyan); color: #000; font-weight: 700; padding: 0.4rem 1rem; border-radius: 6px; font-size: 0.8rem; }
-  .nav-cta:hover { color: #000 !important; opacity: 0.9; }
+  .nav-cta { background: var(--text); color: var(--bg) !important; font-weight: 700 !important; padding: 0.4rem 1.1rem; border-radius: 6px; }
+  .nav-cta:hover { opacity: 0.85; }
 
-  /* Hero */
-  .hero { text-align: center; padding: 6rem 0 4rem; position: relative; }
-  .hero::after { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(24,181,240,0.06) 0%, transparent 70%); pointer-events: none; }
-  .hero h1 { font-size: 3.2rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; }
-  .hero h1 span { background: linear-gradient(135deg, var(--cyan), var(--cobalt)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-  .hero p { color: var(--muted); font-size: 1.15rem; margin-top: 1rem; max-width: 560px; margin-left: auto; margin-right: auto; }
-  .badge { display: inline-block; background: rgba(24,181,240,0.12); color: var(--cyan); font-size: 0.75rem; font-weight: 700; padding: 0.25rem 0.75rem; border-radius: 9999px; border: 1px solid rgba(24,181,240,0.2); margin-top: 1.5rem; letter-spacing: 0.05em; }
-  .hero-btns { display: flex; gap: 0.75rem; justify-content: center; margin-top: 2rem; }
-  .btn-primary { background: linear-gradient(135deg, var(--cyan), var(--cobalt)); color: #fff; font-weight: 700; padding: 0.85rem 2rem; border-radius: 8px; font-size: 1rem; text-decoration: none; border: none; cursor: pointer; }
-  .btn-primary:hover { opacity: 0.9; }
-  .btn-ghost { background: transparent; border: 1px solid var(--border-bright); color: var(--text); font-weight: 600; padding: 0.85rem 2rem; border-radius: 8px; font-size: 1rem; text-decoration: none; }
-  .btn-ghost:hover { border-color: var(--cyan); color: var(--cyan); }
+  /* ── Hero ─────────────────────────────────────────── */
+  .hero { padding: 8rem 0 6rem; text-align: center; position: relative; }
+  .hero::before { content: ''; position: absolute; top: -100px; left: 50%; transform: translateX(-50%); width: 800px; height: 600px; background: radial-gradient(ellipse at center, rgba(24,181,240,0.04) 0%, transparent 65%); pointer-events: none; }
+  .hero-icon { width: 64px; height: 64px; margin-bottom: 2rem; opacity: 0.15; }
+  .hero h1 { font-size: 4rem; font-weight: 900; letter-spacing: -0.04em; line-height: 1.05; max-width: 700px; margin: 0 auto; }
+  .hero h1 em { font-style: normal; background: linear-gradient(135deg, var(--cyan) 20%, var(--cobalt) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .hero-sub { color: var(--dim); font-size: 1.1rem; margin-top: 1.5rem; max-width: 480px; margin-left: auto; margin-right: auto; font-weight: 400; line-height: 1.7; }
+  .hero-actions { display: flex; gap: 0.75rem; justify-content: center; margin-top: 2.5rem; }
+  .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.8rem 1.75rem; border-radius: 8px; font-size: 0.9rem; font-weight: 700; text-decoration: none; transition: all 0.2s; border: none; cursor: pointer; }
+  .btn-fill { background: var(--text); color: var(--bg); }
+  .btn-fill:hover { opacity: 0.85; }
+  .btn-outline { background: transparent; border: 1px solid var(--border-bright); color: var(--dim); }
+  .btn-outline:hover { border-color: var(--cyan); color: var(--cyan); }
+  .hero-note { margin-top: 1.5rem; font-size: 0.72rem; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
 
-  /* Section */
-  section { padding: 4rem 0; }
-  .section-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; color: var(--cyan); margin-bottom: 0.5rem; }
-  .section-title { font-size: 1.8rem; font-weight: 700; margin-bottom: 0.5rem; letter-spacing: -0.02em; }
-  .section-sub { color: var(--muted); font-size: 1rem; margin-bottom: 2rem; max-width: 600px; }
+  /* ── Divider ─────────────────────────────────────── */
+  .divider { height: 1px; background: var(--border); margin: 0; }
 
-  /* Feature grid */
-  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-  .feature { background: var(--glass); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; transition: border-color 0.3s; }
-  .feature:hover { border-color: rgba(24,181,240,0.25); }
-  .feature .icon { font-size: 1.5rem; margin-bottom: 0.75rem; }
-  .feature h4 { font-size: 0.95rem; font-weight: 700; margin-bottom: 0.25rem; }
-  .feature p { font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
+  /* ── Stats strip ─────────────────────────────────── */
+  .stats-strip { padding: 4rem 0; }
+  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }
+  .stat-item .num { font-size: 3rem; font-weight: 900; letter-spacing: -0.03em; font-family: 'JetBrains Mono', monospace; }
+  .stat-item .num.cyan { color: var(--cyan); }
+  .stat-item .num.green { color: var(--green); }
+  .stat-item .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; margin-top: 0.25rem; }
 
-  /* Model grid */
-  .model-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-  .model-card { background: var(--glass); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; }
-  .model-card .type { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--cyan); }
-  .model-card h4 { font-size: 1rem; font-weight: 700; margin: 0.25rem 0; }
-  .model-card .desc { font-size: 0.8rem; color: var(--muted); }
-  .model-card .price { font-size: 0.85rem; color: var(--green); font-weight: 600; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; }
+  /* ── Split sections (alternating text/visual) ────── */
+  .split { padding: 6rem 0; }
+  .split-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center; }
+  .split-inner.reverse { direction: rtl; }
+  .split-inner.reverse > * { direction: ltr; }
+  .split-text h2 { font-size: 2.2rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 1rem; }
+  .split-text p { color: var(--dim); font-size: 0.95rem; line-height: 1.8; margin-bottom: 1.5rem; }
+  .split-text .detail { font-size: 0.8rem; color: var(--muted); border-left: 2px solid var(--cyan); padding-left: 0.75rem; margin-bottom: 0.75rem; }
+  .split-visual { background: var(--glass); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+  .split-visual pre { background: var(--code-bg); margin: 0; padding: 1.5rem; border: none; border-radius: 0; }
+  .split-visual code { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--dim); line-height: 1.8; }
+  .split-visual code .kw { color: var(--cyan); }
+  .split-visual code .str { color: var(--green); }
+  .split-visual code .cmt { color: #3a4a5a; }
+  .split-visual .bar { background: rgba(24,181,240,0.06); padding: 0.6rem 1.5rem; font-size: 0.7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; border-bottom: 1px solid var(--border); display: flex; gap: 0.5rem; align-items: center; }
+  .split-visual .bar .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot-red { background: #ff5f57; }
+  .dot-yellow { background: #febc2e; }
+  .dot-green { background: #28c840; }
 
-  /* Pipeline grid */
-  .pipeline-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
-  .pipeline-card { background: var(--glass); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; display: flex; gap: 1rem; align-items: flex-start; }
-  .pipeline-card .num { background: linear-gradient(135deg, var(--cyan), var(--cobalt)); color: #fff; font-weight: 800; font-size: 0.8rem; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-  .pipeline-card h4 { font-size: 0.95rem; font-weight: 700; margin-bottom: 0.15rem; }
-  .pipeline-card .desc { font-size: 0.8rem; color: var(--muted); }
-  .pipeline-card .meta { font-size: 0.75rem; color: var(--cyan); font-weight: 600; margin-top: 0.4rem; }
+  /* ── Models ──────────────────────────────────────── */
+  .models-section { padding: 6rem 0; }
+  .models-header { text-align: center; margin-bottom: 3rem; }
+  .models-header h2 { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.03em; }
+  .models-header p { color: var(--dim); margin-top: 0.5rem; font-size: 0.95rem; }
+  .models-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--border); border-radius: 16px; overflow: hidden; border: 1px solid var(--border); }
+  .m-card { background: var(--surface); padding: 1.75rem; }
+  .m-card .m-type { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 0.5rem; }
+  .m-card .m-type.img { color: var(--cyan); }
+  .m-card .m-type.vid { color: #a78bfa; }
+  .m-card h4 { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.25rem; }
+  .m-card .m-desc { font-size: 0.8rem; color: var(--muted); }
+  .m-card .m-price { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--green); font-weight: 500; margin-top: 0.75rem; }
 
-  /* Value props */
-  .value-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
-  .value-card { background: var(--glass); border: 1px solid var(--border); border-radius: 12px; padding: 2rem 1.5rem; text-align: center; }
-  .value-card .big { font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, var(--cyan), var(--green)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-  .value-card h4 { font-size: 0.95rem; font-weight: 700; margin: 0.5rem 0 0.25rem; }
-  .value-card p { font-size: 0.8rem; color: var(--muted); }
+  /* ── Pipelines ───────────────────────────────────── */
+  .pipes-section { padding: 6rem 0; }
+  .pipes-header { margin-bottom: 3rem; }
+  .pipes-header h2 { font-size: 2.2rem; font-weight: 800; letter-spacing: -0.03em; }
+  .pipes-header p { color: var(--dim); margin-top: 0.5rem; font-size: 0.95rem; max-width: 500px; }
+  .pipe-list { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+  .pipe-row { display: grid; grid-template-columns: 80px 1fr auto; align-items: center; padding: 1.25rem 1.5rem; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .pipe-row:last-child { border-bottom: none; }
+  .pipe-row:hover { background: var(--glass-hover); }
+  .pipe-steps { font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 700; color: var(--cyan); text-align: center; }
+  .pipe-info h4 { font-size: 0.9rem; font-weight: 700; }
+  .pipe-info p { font-size: 0.78rem; color: var(--muted); }
+  .pipe-cost { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--dim); font-weight: 500; }
 
-  /* SDK */
-  .sdk-section { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }
-  .sdk-info h4 { font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; }
-  .sdk-info p { font-size: 0.85rem; color: var(--muted); margin-bottom: 1rem; }
-  .sdk-install { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--cyan); margin-bottom: 0.5rem; }
-  .tabs { display: flex; gap: 0.5rem; margin-bottom: -1px; position: relative; z-index: 1; }
-  .tab { background: var(--code-bg); border: 1px solid var(--border); border-bottom: none; color: var(--muted); padding: 0.4rem 1rem; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 0.8rem; font-weight: 600; }
-  .tab.active { color: var(--cyan); border-color: rgba(24,181,240,0.3); }
-  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 0 8px 8px 8px; padding: 1.25rem; overflow-x: auto; margin: 0; }
-  code { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text); line-height: 1.7; }
+  /* ── Pricing ─────────────────────────────────────── */
+  .pricing-section { padding: 6rem 0; }
+  .pricing-header { text-align: center; margin-bottom: 3rem; }
+  .pricing-header h2 { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.03em; }
+  .pricing-header p { color: var(--dim); margin-top: 0.5rem; font-size: 0.95rem; }
+  .pricing-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border-radius: 16px; overflow: hidden; border: 1px solid var(--border); }
+  .price-card { background: var(--surface); padding: 2rem 1.5rem; display: flex; flex-direction: column; }
+  .price-card.featured { background: rgba(24,181,240,0.03); }
+  .price-card .tier-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin-bottom: 0.75rem; }
+  .price-card.featured .tier-label { color: var(--cyan); }
+  .price-card .tier-price { font-size: 2rem; font-weight: 900; font-family: 'JetBrains Mono', monospace; letter-spacing: -0.03em; }
+  .price-card .tier-period { font-size: 0.75rem; color: var(--muted); margin-bottom: 1.5rem; }
+  .price-card .tier-detail { font-size: 0.78rem; color: var(--dim); margin-bottom: 0.4rem; }
+  .price-card .tier-cta { margin-top: auto; padding-top: 1.5rem; }
+  .price-card .tier-cta a { display: block; text-align: center; padding: 0.6rem; border-radius: 6px; font-size: 0.8rem; font-weight: 700; text-decoration: none; border: 1px solid var(--border-bright); color: var(--dim); transition: all 0.2s; }
+  .price-card .tier-cta a:hover { border-color: var(--cyan); color: var(--cyan); }
+  .price-card.featured .tier-cta a { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .price-card.featured .tier-cta a:hover { opacity: 0.85; }
 
-  /* Pricing */
-  .pricing-table { width: 100%; border-collapse: collapse; background: var(--glass); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
-  .pricing-table th { background: rgba(24,181,240,0.06); text-align: left; padding: 0.75rem 1rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--cyan); border-bottom: 1px solid var(--border); }
-  .pricing-table td { padding: 0.75rem 1rem; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
-  .pricing-table tr:last-child td { border-bottom: none; }
-  .pricing-table .tier-name { font-weight: 700; }
-  .pricing-table .price-val { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--green); }
-  .popular-row { background: rgba(24,181,240,0.04); }
-  .popular-badge { background: var(--cyan); color: #000; font-size: 0.6rem; font-weight: 700; padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.5rem; }
+  /* ── CTA ──────────────────────────────────────────── */
+  .final-cta { padding: 8rem 0; text-align: center; position: relative; }
+  .final-cta::before { content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(24,181,240,0.03) 0%, transparent 65%); pointer-events: none; }
+  .final-cta h2 { font-size: 2.8rem; font-weight: 900; letter-spacing: -0.04em; }
+  .final-cta h2 em { font-style: normal; color: var(--cyan); }
+  .final-cta p { color: var(--dim); font-size: 1rem; margin-top: 0.75rem; margin-bottom: 2.5rem; }
 
-  /* CTA */
-  .cta-section { text-align: center; padding: 5rem 0; }
-  .cta-section h2 { font-size: 2rem; font-weight: 800; margin-bottom: 0.5rem; }
-  .cta-section p { color: var(--muted); margin-bottom: 2rem; }
+  /* ── Footer ──────────────────────────────────────── */
+  footer { padding: 2rem 0; text-align: center; border-top: 1px solid var(--border); }
+  footer p { font-size: 0.72rem; color: var(--muted); }
+  footer a { color: var(--dim); text-decoration: none; }
+  footer a:hover { color: var(--cyan); }
 
-  /* Footer */
-  footer { text-align: center; padding: 2rem 0; color: var(--muted); font-size: 0.75rem; border-top: 1px solid var(--border); }
-  footer a { color: var(--cyan); text-decoration: none; }
-
-  /* Responsive */
+  /* ── Responsive ──────────────────────────────────── */
   @media (max-width: 768px) {
-    .hero h1 { font-size: 2rem; }
-    .features, .model-grid, .value-grid { grid-template-columns: 1fr; }
-    .pipeline-grid { grid-template-columns: 1fr; }
-    .sdk-section { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 2.4rem; }
+    .split-inner, .split-inner.reverse { grid-template-columns: 1fr; gap: 2rem; direction: ltr; }
+    .stats-row { grid-template-columns: 1fr; gap: 2rem; }
+    .models-grid { grid-template-columns: 1fr; }
+    .pricing-grid { grid-template-columns: 1fr; }
+    .pipe-row { grid-template-columns: 50px 1fr auto; }
     .nav-links a:not(.nav-cta) { display: none; }
+    .hero { padding: 5rem 0 3rem; }
   }
 </style>
 </head>
@@ -127,367 +158,277 @@
 
 <nav>
   <div class="inner">
-    <span class="logo">Eternium API</span>
+    <a href="/" class="nav-brand">
+      <img src="/assets/eternium-icon.png" alt="Eternium">
+      <span>Eternium API</span>
+    </a>
     <div class="nav-links">
       <a href="#models">Models</a>
       <a href="#pipelines">Pipelines</a>
-      <a href="#sdk">SDKs</a>
       <a href="#pricing">Pricing</a>
       <a href="/docs">Docs</a>
-      <a href="/dashboard">Dashboard</a>
       <a href="/signup" class="nav-cta">Get API Key</a>
     </div>
   </div>
 </nav>
 
-<!-- Hero -->
-<div class="hero">
-  <div class="container">
-    <h1>AI Generation<br><span>Built for Agents</span></h1>
-    <p>One API key. Six models. Intelligent caching. Generate images and video with SDKs that handle polling, retries, and timeouts for you.</p>
-    <span class="badge">v2.0 &mdash; LIVE</span>
-    <div class="hero-btns">
-      <a href="/signup" class="btn-primary">Get Your API Key</a>
-      <a href="/docs" class="btn-ghost">Read the Docs</a>
-    </div>
-  </div>
-</div>
 
-<!-- Why Eternium -->
-<section>
-  <div class="container">
-    <div class="section-label">Why Eternium</div>
-    <div class="section-title">Built Different</div>
-    <div class="section-sub">Most APIs charge you every time. Eternium caches identical requests, bundles multi-step workflows, and gives you budget controls that prevent surprise bills.</div>
-    <div class="value-grid">
-      <div class="value-card">
-        <div class="big">$0</div>
-        <h4>Cached Requests</h4>
-        <p>Identical prompt + model combos return instantly from cache at zero cost. Agents love this.</p>
+<!-- ── Hero ──────────────────────────────────────── -->
+<section class="hero">
+  <div class="wrap">
+    <img src="/assets/eternium-white.png" alt="" class="hero-icon">
+    <h1>One API.<br>Every <em>AI model.</em></h1>
+    <p class="hero-sub">Generate images and video from six models with a single key. Smart caching, multi-step pipelines, and SDKs that handle polling and retries.</p>
+    <div class="hero-actions">
+      <a href="/signup" class="btn btn-fill">Get Your API Key</a>
+      <a href="/docs" class="btn btn-outline">Documentation</a>
+    </div>
+    <p class="hero-note">Free tier &middot; No credit card required</p>
+  </div>
+</section>
+
+
+<!-- ── Stats ─────────────────────────────────────── -->
+<div class="divider"></div>
+<section class="stats-strip">
+  <div class="wrap">
+    <div class="stats-row">
+      <div class="stat-item">
+        <div class="num cyan">6</div>
+        <div class="label">AI Models</div>
       </div>
-      <div class="value-card">
-        <div class="big">1 call</div>
-        <h4>Multi-Step Pipelines</h4>
-        <p>Product shots, social packs, video ads — one API call, multiple outputs. No orchestration needed.</p>
+      <div class="stat-item">
+        <div class="num green">$0</div>
+        <div class="label">Cached Requests</div>
       </div>
-      <div class="value-card">
-        <div class="big">Per-key</div>
-        <h4>Budget Controls</h4>
-        <p>Set spending limits per API key. Monthly credit caps enforced server-side. No surprise invoices.</p>
+      <div class="stat-item">
+        <div class="num cyan">4</div>
+        <div class="label">Built-in Pipelines</div>
       </div>
     </div>
   </div>
 </section>
+<div class="divider"></div>
 
-<!-- Features -->
-<section>
-  <div class="container">
-    <div class="section-label">Features</div>
-    <div class="section-title">Everything You Need</div>
-    <div class="section-sub">From prototype to production in minutes, not weeks.</div>
-    <div class="features">
-      <div class="feature">
-        <div class="icon">&#9889;</div>
-        <h4>Agent-Ready SDKs</h4>
-        <p>JavaScript and Python clients that handle polling, retries, and timeouts. One call, one result — no task management.</p>
-      </div>
-      <div class="feature">
-        <div class="icon">&#128200;</div>
-        <h4>Smart Caching</h4>
-        <p>Every request is cached by default. Same prompt? $0 cost, instant response. Disable per-request if needed.</p>
-      </div>
-      <div class="feature">
-        <div class="icon">&#128640;</div>
-        <h4>Multi-Model Pipelines</h4>
-        <p>Product shots, social media packs, video ads — complex workflows in a single API call.</p>
-      </div>
-      <div class="feature">
-        <div class="icon">&#128176;</div>
-        <h4>Usage Tracking</h4>
-        <p>Real-time spend, budget alerts, cache savings, and per-model breakdowns via API and dashboard.</p>
-      </div>
-      <div class="feature">
-        <div class="icon">&#128274;</div>
-        <h4>Per-Key Rate Limiting</h4>
-        <p>Configurable limits per API key based on tier. X-RateLimit headers on every response.</p>
-      </div>
-      <div class="feature">
-        <div class="icon">&#128179;</div>
-        <h4>Stripe Billing</h4>
-        <p>Self-serve signup, tier selection, and Stripe checkout. Users manage their own subscriptions.</p>
-      </div>
-    </div>
-  </div>
-</section>
 
-<!-- Models -->
-<section id="models">
-  <div class="container">
-    <div class="section-label">Models</div>
-    <div class="section-title">Six Models, One API</div>
-    <div class="section-sub">Image and video generation from the best providers. Switch models by changing a string.</div>
-    <div class="model-grid">
-      <div class="model-card">
-        <span class="type">Image</span>
-        <h4>Nano Banana Pro</h4>
-        <p class="desc">Fast 4K image generation with physics simulation</p>
-        <div class="price">~$0.04/image</div>
-      </div>
-      <div class="model-card">
-        <span class="type">Image</span>
-        <h4>Flux Kontext</h4>
-        <p class="desc">Advanced image generation and editing</p>
-        <div class="price">~$0.05/image</div>
-      </div>
-      <div class="model-card">
-        <span class="type">Image</span>
-        <h4>GPT-4o Image</h4>
-        <p class="desc">OpenAI image generation</p>
-        <div class="price">~$0.07/image</div>
-      </div>
-      <div class="model-card">
-        <span class="type">Video</span>
-        <h4>Kling 3.0</h4>
-        <p class="desc">Multi-shot video with element refs and SFX</p>
-        <div class="price">$0.46-$1.43/video</div>
-      </div>
-      <div class="model-card">
-        <span class="type">Video</span>
-        <h4>Kling 2.6</h4>
-        <p class="desc">High-quality video with audio support</p>
-        <div class="price">$0.36-$1.17/video</div>
-      </div>
-      <div class="model-card">
-        <span class="type">Video</span>
-        <h4>Wan 2.6</h4>
-        <p class="desc">HD multi-shot video with native audio</p>
-        <div class="price">$0.39-$1.30/video</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Pipelines -->
-<section id="pipelines">
-  <div class="container">
-    <div class="section-label">Pipelines</div>
-    <div class="section-title">Multi-Step Workflows, One Call</div>
-    <div class="section-sub">Complex generation workflows without orchestration. Built for agents that need multiple outputs.</div>
-    <div class="pipeline-grid">
-      <div class="pipeline-card">
-        <div class="num">3</div>
-        <div>
-          <h4>Product Shot</h4>
-          <p class="desc">3 professional product photos at different angles and lighting</p>
-          <div class="meta">3 steps &middot; ~$0.12 total</div>
+<!-- ── SDK split (text left, code right) ─────────── -->
+<section class="split" id="sdk">
+  <div class="wrap">
+    <div class="split-inner">
+      <div class="split-text">
+        <h2>Ship in minutes,<br>not weeks.</h2>
+        <p>The SDK handles task submission, automatic polling, timeout management, and download URL retrieval. Write three lines. Get a result.</p>
+        <div class="detail">JavaScript and Python clients with full TypeScript types</div>
+        <div class="detail">Configurable timeouts, progress callbacks, retry logic</div>
+        <div class="detail">Pipeline orchestration with parallel task waiting</div>
+        <div style="margin-top:1.5rem;">
+          <a href="/docs" class="btn btn-outline" style="font-size:0.8rem;padding:0.6rem 1.25rem;">Full Documentation</a>
         </div>
       </div>
-      <div class="pipeline-card">
-        <div class="num">3</div>
-        <div>
-          <h4>Social Media Pack</h4>
-          <p class="desc">Images for Instagram (1:1), Stories (9:16), and YouTube (16:9)</p>
-          <div class="meta">3 steps &middot; ~$0.12 total</div>
-        </div>
-      </div>
-      <div class="pipeline-card">
-        <div class="num">2</div>
-        <div>
-          <h4>Video Ad</h4>
-          <p class="desc">Hero image then animate to cinematic 5s video with sound</p>
-          <div class="meta">2 steps &middot; ~$0.76 total</div>
-        </div>
-      </div>
-      <div class="pipeline-card">
-        <div class="num">4</div>
-        <div>
-          <h4>Thumbnail Pack</h4>
-          <p class="desc">4 YouTube thumbnail variations across multiple models</p>
-          <div class="meta">4 steps &middot; ~$0.21 total</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
+      <div class="split-visual">
+        <div class="bar"><span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>&nbsp; app.js</div>
+        <pre><code><span class="kw">import</span> { Eternium } <span class="kw">from</span> <span class="str">'eternium-sdk'</span>
 
-<!-- SDK -->
-<section id="sdk">
-  <div class="container">
-    <div class="section-label">SDKs</div>
-    <div class="section-title">Ship in Minutes</div>
-    <div class="section-sub">JavaScript and Python SDKs that handle the hard parts. Polling, retries, timeouts, caching — all built in.</div>
-    <div class="sdk-section">
-      <div class="sdk-info">
-        <h4>Install</h4>
-        <div class="sdk-install">npm i eternium-sdk</div>
-        <div class="sdk-install">pip install eternium-sdk</div>
-        <h4 style="margin-top:1.5rem;">What the SDK handles</h4>
-        <p>Task submission and automatic polling until completion. Configurable timeouts (default 5 min). Progress callbacks for UI updates. Automatic download URL retrieval. Pipeline orchestration with parallel task waiting. Prompt caching with $0 cost on cache hits.</p>
-        <a href="/docs" class="btn-ghost" style="display:inline-block;margin-top:0.5rem;padding:0.6rem 1.25rem;font-size:0.85rem;">Full Documentation</a>
-      </div>
-      <div>
-        <div class="tabs">
-          <div class="tab active" onclick="showTab('js')">JavaScript</div>
-          <div class="tab" onclick="showTab('py')">Python</div>
-          <div class="tab" onclick="showTab('curl')">cURL</div>
-        </div>
-        <pre id="code-js"><code>import { Eternium } from 'eternium-sdk'
+<span class="kw">const</span> client = <span class="kw">new</span> Eternium(<span class="str">'etrn_your_key'</span>)
 
-const client = new Eternium('etrn_your_key')
-
-// Generate image — returns download URL
-const img = await client.image('A futuristic city at sunset')
+<span class="cmt">// Generate image — returns download URL</span>
+<span class="kw">const</span> img = <span class="kw">await</span> client.image(
+  <span class="str">'A futuristic city at sunset'</span>
+)
 console.log(img.url)
 
-// Generate video with options
-const vid = await client.video('Drone flyover at night', {
-  duration: 10, sound: true, mode: 'pro'
-})
-console.log(vid.url)
-
-// Run a pipeline — 3 product shots, one call
-const pack = await client.runPipeline(
-  'product-shot',
-  'White sneakers on marble'
+<span class="cmt">// Run a pipeline — 3 shots, one call</span>
+<span class="kw">const</span> pack = <span class="kw">await</span> client.runPipeline(
+  <span class="str">'product-shot'</span>,
+  <span class="str">'White sneakers on marble'</span>
 )
-pack.results.forEach(r => console.log(r.url))
-
-// Check your spend
-const usage = await client.getUsage()
-console.log(`${usage.remaining} remaining`)</code></pre>
-        <pre id="code-py" style="display:none;"><code>from eternium import Eternium
-
-client = Eternium("etrn_your_key")
-
-# Generate image — returns download URL
-img = client.image("A futuristic city at sunset")
-print(img["url"])
-
-# Generate video with options
-vid = client.video("Drone flyover at night",
-  duration=10, sound=True, mode="pro"
-)
-print(vid["url"])
-
-# Run a pipeline — 3 product shots, one call
-pack = client.run_pipeline(
-  "product-shot",
-  "White sneakers on marble"
-)
-for r in pack["results"]:
-    print(r["url"])
-
-# Check your spend
-usage = client.get_usage()
-print(f"{usage['remaining']} remaining")</code></pre>
-        <pre id="code-curl" style="display:none;"><code># Generate an image
-curl -X POST https://api.eternium.ai/v1/generate \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: etrn_your_key" \
-  -d '{"model":"nano-banana-pro",
-       "prompt":"A futuristic city at sunset"}'
-
-# Run a pipeline
-curl -X POST https://api.eternium.ai/v1/pipelines/run \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: etrn_your_key" \
-  -d '{"pipeline":"product-shot",
-       "prompt":"White sneakers on marble"}'
-
-# Check task status
-curl https://api.eternium.ai/v1/tasks/TASK_ID \
-  -H "X-API-Key: etrn_your_key"
-
-# Check your usage
-curl https://api.eternium.ai/v1/usage \
-  -H "X-API-Key: etrn_your_key"</code></pre>
+pack.results.forEach(r => console.log(r.url))</code></pre>
       </div>
     </div>
   </div>
 </section>
 
-<!-- Pricing -->
-<section id="pricing">
-  <div class="container">
-    <div class="section-label">Pricing</div>
-    <div class="section-title">Simple, Transparent Tiers</div>
-    <div class="section-sub">Start free. Upgrade when you need more. No hidden fees, no per-seat pricing.</div>
-    <table class="pricing-table">
-      <thead>
-        <tr><th>Tier</th><th>Monthly</th><th>Credits</th><th>Rate Limit</th><th>Concurrent</th><th></th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="tier-name">Free</td>
-          <td class="price-val">$0</td>
-          <td>$2.00</td>
-          <td>10/min</td>
-          <td>2</td>
-          <td><a href="/signup" style="color:var(--cyan);font-size:0.85rem;font-weight:600;text-decoration:none;">Start Free &rarr;</a></td>
-        </tr>
-        <tr>
-          <td class="tier-name">Starter</td>
-          <td class="price-val">$29</td>
-          <td>$22.00</td>
-          <td>30/min</td>
-          <td>5</td>
-          <td><a href="/signup" style="color:var(--cyan);font-size:0.85rem;font-weight:600;text-decoration:none;">Get Started &rarr;</a></td>
-        </tr>
-        <tr class="popular-row">
-          <td class="tier-name">Builder <span class="popular-badge">POPULAR</span></td>
-          <td class="price-val">$79</td>
-          <td>$62.00</td>
-          <td>45/min</td>
-          <td>10</td>
-          <td><a href="/signup" style="color:var(--cyan);font-size:0.85rem;font-weight:600;text-decoration:none;">Get Started &rarr;</a></td>
-        </tr>
-        <tr>
-          <td class="tier-name">Scale</td>
-          <td class="price-val">$199</td>
-          <td>$165.00</td>
-          <td>60/min</td>
-          <td>20</td>
-          <td><a href="/signup" style="color:var(--cyan);font-size:0.85rem;font-weight:600;text-decoration:none;">Get Started &rarr;</a></td>
-        </tr>
-        <tr>
-          <td class="tier-name">Enterprise</td>
-          <td class="price-val">Custom</td>
-          <td>Custom</td>
-          <td>120/min</td>
-          <td>50</td>
-          <td><a href="mailto:ty@eternium.ai" style="color:var(--cyan);font-size:0.85rem;font-weight:600;text-decoration:none;">Contact &rarr;</a></td>
-        </tr>
-      </tbody>
-    </table>
+
+<!-- ── Caching split (code left, text right) ─────── -->
+<section class="split">
+  <div class="wrap">
+    <div class="split-inner reverse">
+      <div class="split-text">
+        <h2>Agents send the same prompt twice.<br>You pay <em style="font-style:normal;color:var(--green);">once.</em></h2>
+        <p>Every generation is cached by default. When an agent retries an identical request, the response returns instantly at zero cost. No configuration needed.</p>
+        <div class="detail">1-hour TTL, prompt + model + params hashed</div>
+        <div class="detail">Cache hits marked in response with savings amount</div>
+        <div class="detail">Disable per-request with cache: false</div>
+      </div>
+      <div class="split-visual">
+        <div class="bar"><span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>&nbsp; response.json</div>
+        <pre><code>{
+  <span class="str">"_cached"</span>: <span class="kw">true</span>,
+  <span class="str">"_saved"</span>: <span class="str">"$0.04"</span>,
+  <span class="str">"_cost"</span>: <span class="str">"$0.00"</span>,
+  <span class="str">"data"</span>: {
+    <span class="str">"taskId"</span>: <span class="str">"348c02..."</span>,
+    <span class="str">"status"</span>: <span class="str">"completed"</span>
+  }
+}</code></pre>
+      </div>
+    </div>
   </div>
 </section>
 
-<!-- CTA -->
-<section class="cta-section">
-  <div class="container">
-    <h2>Get Started in <span style="color:var(--cyan);">60 Seconds</span></h2>
-    <p>Create an account, choose your tier, and start generating. No credit card required for free tier.</p>
-    <div class="hero-btns">
-      <a href="/signup" class="btn-primary">Get Your API Key</a>
-      <a href="/docs" class="btn-ghost">Read the Docs</a>
+
+<!-- ── Models ────────────────────────────────────── -->
+<div class="divider"></div>
+<section class="models-section" id="models">
+  <div class="wrap">
+    <div class="models-header">
+      <h2>Six models. One key.</h2>
+      <p>Switch models by changing a string. Same auth, same response format, same SDK.</p>
+    </div>
+    <div class="models-grid">
+      <div class="m-card">
+        <div class="m-type img">Image</div>
+        <h4>Nano Banana Pro</h4>
+        <p class="m-desc">Fast 4K generation with physics simulation</p>
+        <div class="m-price">~$0.04 /image</div>
+      </div>
+      <div class="m-card">
+        <div class="m-type img">Image</div>
+        <h4>Flux Kontext</h4>
+        <p class="m-desc">Advanced generation and editing</p>
+        <div class="m-price">~$0.05 /image</div>
+      </div>
+      <div class="m-card">
+        <div class="m-type img">Image</div>
+        <h4>GPT-4o Image</h4>
+        <p class="m-desc">OpenAI image generation</p>
+        <div class="m-price">~$0.07 /image</div>
+      </div>
+      <div class="m-card">
+        <div class="m-type vid">Video</div>
+        <h4>Kling 3.0</h4>
+        <p class="m-desc">Multi-shot video with element refs and SFX</p>
+        <div class="m-price">$0.46 – $1.43 /video</div>
+      </div>
+      <div class="m-card">
+        <div class="m-type vid">Video</div>
+        <h4>Kling 2.6</h4>
+        <p class="m-desc">High-quality video with audio support</p>
+        <div class="m-price">$0.36 – $1.17 /video</div>
+      </div>
+      <div class="m-card">
+        <div class="m-type vid">Video</div>
+        <h4>Wan 2.6</h4>
+        <p class="m-desc">HD multi-shot video with native audio</p>
+        <div class="m-price">$0.39 – $1.30 /video</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ── Pipelines ─────────────────────────────────── -->
+<div class="divider"></div>
+<section class="pipes-section" id="pipelines">
+  <div class="wrap">
+    <div class="pipes-header">
+      <h2>Pipelines</h2>
+      <p>Multi-step workflows in a single API call. No orchestration code, no managing task arrays.</p>
+    </div>
+    <div class="pipe-list">
+      <div class="pipe-row">
+        <div class="pipe-steps">3</div>
+        <div class="pipe-info"><h4>Product Shot</h4><p>3 angles, professional lighting, white background</p></div>
+        <div class="pipe-cost">~$0.12</div>
+      </div>
+      <div class="pipe-row">
+        <div class="pipe-steps">3</div>
+        <div class="pipe-info"><h4>Social Media Pack</h4><p>Instagram 1:1, Stories 9:16, YouTube 16:9</p></div>
+        <div class="pipe-cost">~$0.12</div>
+      </div>
+      <div class="pipe-row">
+        <div class="pipe-steps">2</div>
+        <div class="pipe-info"><h4>Video Ad</h4><p>Hero image, then animate to 5s cinematic clip with sound</p></div>
+        <div class="pipe-cost">~$0.76</div>
+      </div>
+      <div class="pipe-row">
+        <div class="pipe-steps">4</div>
+        <div class="pipe-info"><h4>Thumbnail Pack</h4><p>4 YouTube thumbnail variations across models</p></div>
+        <div class="pipe-cost">~$0.21</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ── Pricing ───────────────────────────────────── -->
+<div class="divider"></div>
+<section class="pricing-section" id="pricing">
+  <div class="wrap">
+    <div class="pricing-header">
+      <h2>Pricing</h2>
+      <p>Start free. No hidden fees.</p>
+    </div>
+    <div class="pricing-grid">
+      <div class="price-card">
+        <div class="tier-label">Free</div>
+        <div class="tier-price">$0</div>
+        <div class="tier-period">forever</div>
+        <div class="tier-detail">$2 in credits</div>
+        <div class="tier-detail">10 requests/min</div>
+        <div class="tier-detail">2 concurrent tasks</div>
+        <div class="tier-cta"><a href="/signup">Start Free</a></div>
+      </div>
+      <div class="price-card">
+        <div class="tier-label">Starter</div>
+        <div class="tier-price">$29</div>
+        <div class="tier-period">/month</div>
+        <div class="tier-detail">$22 in credits</div>
+        <div class="tier-detail">30 requests/min</div>
+        <div class="tier-detail">5 concurrent tasks</div>
+        <div class="tier-cta"><a href="/signup">Get Started</a></div>
+      </div>
+      <div class="price-card featured">
+        <div class="tier-label">Builder</div>
+        <div class="tier-price">$79</div>
+        <div class="tier-period">/month</div>
+        <div class="tier-detail">$62 in credits</div>
+        <div class="tier-detail">45 requests/min</div>
+        <div class="tier-detail">10 concurrent tasks</div>
+        <div class="tier-cta"><a href="/signup">Get Started</a></div>
+      </div>
+      <div class="price-card">
+        <div class="tier-label">Scale</div>
+        <div class="tier-price">$199</div>
+        <div class="tier-period">/month</div>
+        <div class="tier-detail">$165 in credits</div>
+        <div class="tier-detail">60 requests/min</div>
+        <div class="tier-detail">20 concurrent tasks</div>
+        <div class="tier-cta"><a href="/signup">Get Started</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ── Final CTA ─────────────────────────────────── -->
+<div class="divider"></div>
+<section class="final-cta">
+  <div class="wrap">
+    <h2>Start building<br>in <em>60 seconds.</em></h2>
+    <p>Create an account, get your key, generate your first image.</p>
+    <div class="hero-actions">
+      <a href="/signup" class="btn btn-fill">Get Your API Key</a>
+      <a href="/docs" class="btn btn-outline">Read the Docs</a>
     </div>
   </div>
 </section>
 
 <footer>
-  <div class="container">
+  <div class="wrap">
     <p>&copy; 2026 <a href="https://eternium.ai">Eternium LLC</a>. All rights reserved.</p>
   </div>
 </footer>
 
-<script>
-function showTab(tab) {
-  ['js', 'py', 'curl'].forEach(t => {
-    document.getElementById('code-' + t).style.display = t === tab ? 'block' : 'none';
-  });
-  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-  event.target.classList.add('active');
-}
-</script>
 </body>
 </html>

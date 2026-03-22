@@ -11,7 +11,9 @@
   body { font-family: 'Montserrat', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
   .container { max-width: 480px; width: 100%; padding: 2rem; }
 
-  h1 { font-size: 1.8rem; text-align: center; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; }
+  h1 { font-size: 1.8rem; font-weight: 800; text-align: center; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; }
+  .brand-mark { display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 1.5rem; }
+  .brand-mark img { height: 28px; }
   .subtitle { text-align: center; color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
 
   /* Steps */
@@ -61,6 +63,7 @@
 
   <!-- Step 1: Create Account -->
   <div id="step-1">
+    <div class="brand-mark"><img src="/assets/eternium-icon.png" alt="Eternium"></div>
     <h1>Eternium API</h1>
     <p class="subtitle">AI generation built for agents. Get your key in 60 seconds.</p>
     <div class="steps"><span class="step-dot active"></span><span class="step-dot"></span><span class="step-dot"></span></div>
