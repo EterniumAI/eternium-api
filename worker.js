@@ -75,15 +75,16 @@ const OPENAI_COSTS = {
 
 // ── Markup multipliers ──────────────────────────────────────────
 const MARKUP = { image: 1.35, video: 1.30, chat: 1.30, embedding: 1.20, audio: 1.25 };
+const PARTNER_MARKUP = 1.18; // flat 18% across all types for partner-tier clients
 
 // ── Cost → credits (returns integer) ────────────────────────────
 function getGenerationCost(model, params = {}, keyTier = null) {
 	const base = KIE_COSTS[model];
 	if (!base) return 0;
-	const noMarkup = keyTier === 'internal';
+	const mul = keyTier === 'internal' ? 1 : keyTier === 'partner' ? PARTNER_MARKUP : null;
 
 	if (typeof base === 'number') {
-		const usd = base * (noMarkup ? 1 : MARKUP.image);
+		const usd = base * (mul ?? MARKUP.image);
 		return Math.ceil(usd / CREDIT_VALUE);
 	}
 
@@ -92,7 +93,7 @@ function getGenerationCost(model, params = {}, keyTier = null) {
 	const duration = params.duration || 5;
 	const tier = base[mode] || base[Object.keys(base)[0]];
 	const raw = tier[duration] || tier[Object.keys(tier)[0]];
-	const usd = raw * (noMarkup ? 1 : MARKUP.video);
+	const usd = raw * (mul ?? MARKUP.video);
 	return Math.ceil(usd / CREDIT_VALUE);
 }
 
@@ -100,13 +101,12 @@ function getGenerationCost(model, params = {}, keyTier = null) {
 function getChatCost(model, inputTokens = 0, outputTokens = 0, keyTier = null) {
 	const costs = OPENAI_COSTS[model];
 	if (!costs) return 0;
-	const noMarkup = keyTier === 'internal';
+	const mul = keyTier === 'internal' ? 1 : keyTier === 'partner' ? PARTNER_MARKUP : null;
 
 	// Audio: per-minute pricing
 	if (costs.perMinute !== undefined) {
-		// Estimate ~150 tokens per minute of audio, or flat 2 credits minimum
-		const usd = costs.perMinute * Math.max(1, inputTokens); // inputTokens = duration in minutes
-		const markup = noMarkup ? 1 : MARKUP.audio;
+		const usd = costs.perMinute * Math.max(1, inputTokens);
+		const markup = mul ?? MARKUP.audio;
 		return Math.max(2, Math.ceil((usd * markup) / CREDIT_VALUE));
 	}
 
@@ -115,7 +115,7 @@ function getChatCost(model, inputTokens = 0, outputTokens = 0, keyTier = null) {
 	const outputCost = (outputTokens / 1_000_000) * (costs.output || 0);
 	const usd = inputCost + outputCost;
 	const markupType = costs.output > 0 ? 'chat' : 'embedding';
-	const markup = noMarkup ? 1 : MARKUP[markupType];
+	const markup = mul ?? MARKUP[markupType];
 	return Math.max(1, Math.ceil((usd * markup) / CREDIT_VALUE));
 }
 
@@ -126,6 +126,7 @@ const TIERS = {
 	builder:    { name: 'Builder',    monthlyCredits: 12400,     rateLimit: 45,  concurrentTasks: 10 },
 	scale:      { name: 'Scale',      monthlyCredits: 33000,     rateLimit: 60,  concurrentTasks: 20 },
 	enterprise: { name: 'Enterprise', monthlyCredits: 200000,    rateLimit: 120, concurrentTasks: 50 },
+	partner:    { name: 'Partner',    monthlyCredits: 500000,    rateLimit: 120, concurrentTasks: 50 },
 	internal:   { name: 'Internal',   monthlyCredits: 2000000,   rateLimit: 200, concurrentTasks: 100 },
 };
 

@@ -22,7 +22,7 @@ const STRIPE_PRICES = {
 	scale: 'price_1TDYXVIyAjP5WeLpWo6KL0oE',      // $199/mo
 };
 
-const MRR_VALUES = { free: 0, starter: 29, builder: 79, scale: 199, enterprise: 0 };
+const MRR_VALUES = { free: 0, starter: 29, builder: 79, scale: 199, enterprise: 0, partner: 0, internal: 0 };
 
 // ── Crypto helpers ──────────────────────────────────────────────
 async function hashPassword(password, existingSalt = null) {
