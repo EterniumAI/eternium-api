@@ -5,6 +5,7 @@
  *
  * Environment variables (Cloudflare Dashboard or wrangler secret):
  *   KIE_API_KEY            — Kie.ai API key
+ *   OPENAI_API_KEY         — OpenAI API key (for chat, embeddings, audio proxy)
  *   STRIPE_SECRET_KEY      — Stripe API key
  *   STRIPE_WEBHOOK_SECRET  — Stripe webhook signing secret
  *   JWT_SECRET             — Session token secret
@@ -60,8 +61,20 @@ const KIE_COSTS = {
 	'seedance-2':   { std: { 5: 0.35, 10: 0.70 }, pro: { 5: 0.55, 10: 1.10 } },
 };
 
+// ── OpenAI base costs (USD per 1M tokens) ──────────────────────
+const OPENAI_COSTS = {
+	'gpt-5.1':             { input: 0.63,  output: 5.00 },
+	'gpt-5.1-codex-mini':  { input: 0.25,  output: 2.00 },
+	'gpt-5.4':             { input: 1.25,  output: 10.00 },
+	'gpt-4o':              { input: 2.50,  output: 10.00 },  // legacy/sunset
+	'gpt-4o-mini':         { input: 0.15,  output: 0.60 },   // legacy/sunset
+	'text-embedding-3-small': { input: 0.02, output: 0 },
+	'text-embedding-3-large': { input: 0.13, output: 0 },
+	'whisper-1':           { perMinute: 0.006 },
+};
+
 // ── Markup multipliers ──────────────────────────────────────────
-const MARKUP = { image: 1.35, video: 1.30 };
+const MARKUP = { image: 1.35, video: 1.30, chat: 1.30, embedding: 1.20, audio: 1.25 };
 
 // ── Cost → credits (returns integer) ────────────────────────────
 function getGenerationCost(model, params = {}, keyTier = null) {
@@ -81,6 +94,29 @@ function getGenerationCost(model, params = {}, keyTier = null) {
 	const raw = tier[duration] || tier[Object.keys(tier)[0]];
 	const usd = raw * (noMarkup ? 1 : MARKUP.video);
 	return Math.ceil(usd / CREDIT_VALUE);
+}
+
+// ── Chat/embedding/audio cost → credits ─────────────────────────
+function getChatCost(model, inputTokens = 0, outputTokens = 0, keyTier = null) {
+	const costs = OPENAI_COSTS[model];
+	if (!costs) return 0;
+	const noMarkup = keyTier === 'internal';
+
+	// Audio: per-minute pricing
+	if (costs.perMinute !== undefined) {
+		// Estimate ~150 tokens per minute of audio, or flat 2 credits minimum
+		const usd = costs.perMinute * Math.max(1, inputTokens); // inputTokens = duration in minutes
+		const markup = noMarkup ? 1 : MARKUP.audio;
+		return Math.max(2, Math.ceil((usd * markup) / CREDIT_VALUE));
+	}
+
+	// Chat / embedding: per-token pricing
+	const inputCost = (inputTokens / 1_000_000) * costs.input;
+	const outputCost = (outputTokens / 1_000_000) * (costs.output || 0);
+	const usd = inputCost + outputCost;
+	const markupType = costs.output > 0 ? 'chat' : 'embedding';
+	const markup = noMarkup ? 1 : MARKUP[markupType];
+	return Math.max(1, Math.ceil((usd * markup) / CREDIT_VALUE));
 }
 
 // ── Tier definitions (credits, not dollars) ─────────────────────
@@ -193,6 +229,56 @@ const MODELS = {
 		description: 'High-quality video generation with audio support',
 		defaults: { duration: 5, aspect_ratio: '16:9', mode: 'std', sound: false },
 		credits_per_gen: '73-234',
+	},
+
+	// ── Chat Models ──
+	'gpt-5.1': {
+		type: 'chat', name: 'GPT-5.1', provider: 'OpenAI',
+		description: 'OpenAI GPT-5.1 — fast, capable chat model for classification, extraction, and generation',
+		pricing: { input_per_1m: 0.63, output_per_1m: 5.00 },
+		featured: true,
+	},
+	'gpt-5.1-codex-mini': {
+		type: 'chat', name: 'GPT-5.1 Codex Mini', provider: 'OpenAI',
+		description: 'Compact GPT-5.1 variant — budget-friendly for simple classification and extraction',
+		pricing: { input_per_1m: 0.25, output_per_1m: 2.00 },
+	},
+	'gpt-5.4': {
+		type: 'chat', name: 'GPT-5.4', provider: 'OpenAI',
+		description: 'OpenAI frontier model — maximum capability for complex reasoning',
+		pricing: { input_per_1m: 1.25, output_per_1m: 10.00 },
+		featured: true,
+	},
+	'gpt-4o': {
+		type: 'chat', name: 'GPT-4o (Legacy)', provider: 'OpenAI',
+		description: 'Legacy model — sunset Feb 2026. Use GPT-5.1 instead.',
+		pricing: { input_per_1m: 2.50, output_per_1m: 10.00 },
+		deprecated: true,
+	},
+	'gpt-4o-mini': {
+		type: 'chat', name: 'GPT-4o Mini (Legacy)', provider: 'OpenAI',
+		description: 'Legacy compact model — sunset Feb 2026. Use GPT-5.1-Codex-Mini instead.',
+		pricing: { input_per_1m: 0.15, output_per_1m: 0.60 },
+		deprecated: true,
+	},
+
+	// ── Embedding Models ──
+	'text-embedding-3-small': {
+		type: 'embedding', name: 'Text Embedding 3 Small', provider: 'OpenAI',
+		description: 'Fast, efficient embeddings for semantic search and RAG',
+		pricing: { input_per_1m: 0.02 },
+	},
+	'text-embedding-3-large': {
+		type: 'embedding', name: 'Text Embedding 3 Large', provider: 'OpenAI',
+		description: 'High-dimensional embeddings for maximum retrieval accuracy',
+		pricing: { input_per_1m: 0.13 },
+	},
+
+	// ── Audio Models ──
+	'whisper-1': {
+		type: 'audio', name: 'Whisper', provider: 'OpenAI',
+		description: 'Speech-to-text transcription with multi-language support',
+		pricing: { per_minute: 0.006 },
 	},
 };
 
@@ -362,6 +448,213 @@ async function kieGet(path, env) {
 		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.KIE_API_KEY}` },
 	});
 	return res.json();
+}
+
+// ── OpenAI proxy (chat, embeddings, audio) ──────────────────────
+const OPENAI_BASE = 'https://api.openai.com/v1';
+
+async function openaiProxy(path, request, env, keyData) {
+	if (!env.OPENAI_API_KEY) {
+		return { error: 'OpenAI API key not configured', code: 503 };
+	}
+
+	const contentType = request.headers.get('Content-Type') || '';
+	const isMultipart = contentType.includes('multipart/form-data');
+
+	// Forward the request to OpenAI
+	const upstreamHeaders = {
+		'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+	};
+	if (!isMultipart) {
+		upstreamHeaders['Content-Type'] = 'application/json';
+	} else {
+		upstreamHeaders['Content-Type'] = contentType;
+	}
+
+	const upstreamRes = await fetch(`${OPENAI_BASE}${path}`, {
+		method: 'POST',
+		headers: upstreamHeaders,
+		body: request.body,
+	});
+
+	return upstreamRes;
+}
+
+async function handleChatCompletions(request, env, keyData) {
+	let body;
+	try {
+		// Clone request so we can read body AND forward it
+		const cloned = request.clone();
+		body = await cloned.json();
+	} catch {
+		return { response: json({ error: 'Invalid JSON body' }, 400) };
+	}
+
+	const model = body.model || 'gpt-5.1';
+	if (!OPENAI_COSTS[model]) {
+		return { response: json({ error: `Unknown chat model: ${model}. Available: ${Object.keys(OPENAI_COSTS).filter(m => !OPENAI_COSTS[m].perMinute).join(', ')}` }, 400) };
+	}
+
+	const isStreaming = body.stream === true;
+
+	// Pre-estimate budget (rough: ~1000 tokens input for classification tasks)
+	const estimatedCredits = getChatCost(model, 1000, 500, keyData.tier);
+	const budget = await checkBudget(env, keyData.key, keyData.tier, estimatedCredits);
+	if (!budget.allowed) {
+		return { response: json({ error: 'Monthly credit limit reached.', usage: { spent: budget.spent, limit: budget.limit } }, 402) };
+	}
+
+	// Inject stream_options for usage tracking on streaming
+	if (isStreaming && !body.stream_options) {
+		body.stream_options = { include_usage: true };
+	}
+
+	// Forward to OpenAI
+	const upstreamRes = await fetch(`${OPENAI_BASE}/chat/completions`, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify(body),
+	});
+
+	if (!upstreamRes.ok) {
+		const errBody = await upstreamRes.text();
+		return { response: new Response(errBody, { status: upstreamRes.status, headers: { 'Content-Type': 'application/json' } }) };
+	}
+
+	if (isStreaming) {
+		// Stream through, track usage from the final chunk
+		const { readable, writable } = new TransformStream();
+		const writer = writable.getWriter();
+		const reader = upstreamRes.body.getReader();
+		const decoder = new TextDecoder();
+		const encoder = new TextEncoder();
+
+		(async () => {
+			try {
+				let buffer = '';
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					const chunk = decoder.decode(value, { stream: true });
+					buffer += chunk;
+					await writer.write(value);
+
+					// Look for usage in SSE data
+					const lines = buffer.split('\n');
+					buffer = lines.pop() || '';
+					for (const line of lines) {
+						if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+							try {
+								const parsed = JSON.parse(line.slice(6));
+								if (parsed.usage) {
+									const credits = getChatCost(model, parsed.usage.prompt_tokens || 0, parsed.usage.completion_tokens || 0, keyData.tier);
+									await trackUsage(env, keyData.key, credits, model, false);
+								}
+							} catch { /* not JSON or no usage */ }
+						}
+					}
+				}
+			} catch { /* stream error */ }
+			finally { await writer.close(); }
+		})();
+
+		return {
+			response: new Response(readable, {
+				status: 200,
+				headers: {
+					'Content-Type': 'text/event-stream',
+					'Cache-Control': 'no-cache',
+					'Connection': 'keep-alive',
+				},
+			}),
+		};
+	}
+
+	// Non-streaming: parse response, track usage, return verbatim
+	const data = await upstreamRes.json();
+	if (data.usage) {
+		const credits = getChatCost(model, data.usage.prompt_tokens || 0, data.usage.completion_tokens || 0, keyData.tier);
+		await trackUsage(env, keyData.key, credits, model, false);
+	}
+
+	return { response: new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }) };
+}
+
+async function handleEmbeddings(request, env, keyData) {
+	let body;
+	try {
+		const cloned = request.clone();
+		body = await cloned.json();
+	} catch {
+		return { response: json({ error: 'Invalid JSON body' }, 400) };
+	}
+
+	const model = body.model || 'text-embedding-3-small';
+
+	// Budget check
+	const estimatedCredits = getChatCost(model, 500, 0, keyData.tier);
+	const budget = await checkBudget(env, keyData.key, keyData.tier, estimatedCredits);
+	if (!budget.allowed) {
+		return { response: json({ error: 'Monthly credit limit reached.' }, 402) };
+	}
+
+	const upstreamRes = await fetch(`${OPENAI_BASE}/embeddings`, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify(body),
+	});
+
+	if (!upstreamRes.ok) {
+		const errBody = await upstreamRes.text();
+		return { response: new Response(errBody, { status: upstreamRes.status, headers: { 'Content-Type': 'application/json' } }) };
+	}
+
+	const data = await upstreamRes.json();
+	if (data.usage) {
+		const credits = getChatCost(model, data.usage.prompt_tokens || data.usage.total_tokens || 0, 0, keyData.tier);
+		await trackUsage(env, keyData.key, credits, model, false);
+	}
+
+	return { response: new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }) };
+}
+
+async function handleAudioTranscriptions(request, env, keyData) {
+	// Budget check (flat ~2 credits for short voice clips)
+	const estimatedCredits = getChatCost('whisper-1', 1, 0, keyData.tier); // 1 minute estimate
+	const budget = await checkBudget(env, keyData.key, keyData.tier, estimatedCredits);
+	if (!budget.allowed) {
+		return { response: json({ error: 'Monthly credit limit reached.' }, 402) };
+	}
+
+	// Forward multipart/form-data directly — pipe the body stream
+	const contentType = request.headers.get('Content-Type') || '';
+	const upstreamRes = await fetch(`${OPENAI_BASE}/audio/transcriptions`, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+			'Content-Type': contentType,
+		},
+		body: request.body,
+	});
+
+	if (!upstreamRes.ok) {
+		const errBody = await upstreamRes.text();
+		return { response: new Response(errBody, { status: upstreamRes.status, headers: { 'Content-Type': 'application/json' } }) };
+	}
+
+	// Track usage (flat cost per transcription)
+	await trackUsage(env, keyData.key, estimatedCredits, 'whisper-1', false);
+
+	// Return verbatim
+	const responseBody = await upstreamRes.text();
+	const responseContentType = upstreamRes.headers.get('Content-Type') || 'application/json';
+	return { response: new Response(responseBody, { status: 200, headers: { 'Content-Type': responseContentType } }) };
 }
 
 // ── Build Kie request body from our params ──────────────────────
@@ -634,6 +927,9 @@ export default {
 				endpoints: {
 					'POST /v1/generate': { description: 'Generate image or video', body: { model: 'string', prompt: 'string', cache: 'boolean (default true)', '...': 'model-specific' } },
 					'POST /v1/pipelines/run': { description: 'Run a multi-step pipeline', body: { pipeline: 'string', prompt: 'string' } },
+					'POST /v1/chat/completions': { description: 'OpenAI-compatible chat completions proxy (supports streaming)', body: { model: 'string', messages: 'array', stream: 'boolean' } },
+					'POST /v1/embeddings': { description: 'OpenAI-compatible embeddings proxy', body: { model: 'string', input: 'string|array' } },
+					'POST /v1/audio/transcriptions': { description: 'OpenAI-compatible audio transcription proxy', body: 'multipart/form-data with file + model' },
 					'GET /v1/tasks/:id': { description: 'Check task status' },
 					'GET /v1/tasks/:id/download': { description: 'Get download URL (expires 20m)' },
 					'GET /v1/models': { description: 'List all models (includes provider, featured flag, credits)' },
@@ -734,6 +1030,33 @@ export default {
 
 		const headers = { ...cors, ...rlHeaders };
 
+		// ── OpenAI-compatible routes (chat, embeddings, audio) ──────
+		// POST /v1/chat/completions
+		if (url.pathname === '/v1/chat/completions' && request.method === 'POST') {
+			const result = await handleChatCompletions(request, env, keyData);
+			// Add rate limit + CORS headers to the response
+			const resHeaders = new Headers(result.response.headers);
+			for (const [k, v] of Object.entries(headers)) resHeaders.set(k, v);
+			return new Response(result.response.body, { status: result.response.status, headers: resHeaders });
+		}
+
+		// POST /v1/embeddings
+		if (url.pathname === '/v1/embeddings' && request.method === 'POST') {
+			const result = await handleEmbeddings(request, env, keyData);
+			const resHeaders = new Headers(result.response.headers);
+			for (const [k, v] of Object.entries(headers)) resHeaders.set(k, v);
+			return new Response(result.response.body, { status: result.response.status, headers: resHeaders });
+		}
+
+		// POST /v1/audio/transcriptions
+		if (url.pathname === '/v1/audio/transcriptions' && request.method === 'POST') {
+			const result = await handleAudioTranscriptions(request, env, keyData);
+			const resHeaders = new Headers(result.response.headers);
+			for (const [k, v] of Object.entries(headers)) resHeaders.set(k, v);
+			return new Response(result.response.body, { status: result.response.status, headers: resHeaders });
+		}
+
+		// ── Kie.ai generation routes ────────────────────────────────
 		// POST /v1/generate
 		if (url.pathname === '/v1/generate' && request.method === 'POST') {
 			let body;
