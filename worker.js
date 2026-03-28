@@ -19,7 +19,7 @@
  */
 
 import {
-	handleSignup, handleLogin, handleCheckout, handleProvisionKey,
+	handleSignup, handleLogin, handleCheckout, handleProvisionKey, handleRegenerateKey,
 	handleStripeSuccess, handleStripeWebhook,
 	handleAdminOverview, handleAdminRevoke, handleAdminActivate,
 } from './auth.js';
@@ -28,14 +28,17 @@ const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
 const CREDIT_VALUE = 0.005; // 1 credit = $0.005 (200 credits per dollar)
 
-const ALLOWED_ORIGINS = [
+// CORS: Open to all origins. Security is enforced by API key authentication,
+// not by origin restrictions. Every major API (OpenAI, Stripe, Twilio) does this.
+// CORS is a browser-only mechanism and provides zero protection against
+// server-side callers. The API key in X-API-Key header is the auth boundary.
+//
+// Sensitive internal origins get explicit matching for Vary/caching correctness.
+const INTERNAL_ORIGINS = new Set([
 	'https://eternium.ai',
 	'https://api.eternium.ai',
 	'https://helix.eternium.ai',
-	'http://localhost:3000',
-	'http://localhost:5173',
-	'http://localhost:8787',
-];
+]);
 
 // ── Kie.ai base costs (USD) ────────────────────────────────────
 // Image models: flat per-image cost
@@ -426,8 +429,13 @@ function corsHeaders(origin) {
 		'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, DELETE',
 		'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
 		'Access-Control-Max-Age': '86400',
+		// Vary: Origin ensures CDN/browser caches don't mix responses across origins
+		'Vary': 'Origin',
 	};
-	if (ALLOWED_ORIGINS.includes(origin)) {
+	if (origin) {
+		// Allow all origins. API key auth is the security boundary, not CORS.
+		// Credentials (cookies) are never used — omitting Access-Control-Allow-Credentials
+		// prevents browsers from sending ambient credentials cross-origin.
 		headers['Access-Control-Allow-Origin'] = origin;
 	}
 	return headers;
@@ -884,6 +892,7 @@ export default {
 				docs: 'https://api.eternium.ai/docs',
 				models: Object.keys(MODELS).length,
 				pipelines: Object.keys(PIPELINES).length,
+				content_api: !!env.SUPABASE_URL,
 			}, 200, cors);
 		}
 
@@ -938,6 +947,11 @@ export default {
 					'GET /v1/pipelines': { description: 'List available pipelines' },
 					'GET /v1/tiers': { description: 'List pricing tiers with credit allotments' },
 					'GET /v1/usage': { description: 'Get your credit usage & budget (authenticated)' },
+					'GET /v1/content/blog': { description: 'List published blog posts', query: { limit: 'number (max 100)', offset: 'number' } },
+					'GET /v1/content/blog/:slug': { description: 'Get a blog post by slug' },
+					'POST /v1/content/blog/publish': { description: 'Publish a blog post (admin only)', body: { item_id: 'uuid', title: 'string', content: 'markdown', seo_title: 'string', seo_description: 'string' } },
+					'GET /v1/content/products': { description: 'List productized datasets and templates', query: { category: 'string' } },
+					'GET /v1/content/datasets': { description: 'List all datasets', query: { category: 'string' } },
 				},
 				models: Object.entries(MODELS).map(([id, m]) => ({
 					id, type: m.type, name: m.name, provider: m.provider, credits_per_gen: m.credits_per_gen, featured: m.featured || false,
@@ -963,6 +977,10 @@ export default {
 			const result = await handleProvisionKey(request, env);
 			return json(result.data || { error: result.error }, result.code, cors);
 		}
+		if (url.pathname === '/auth/regenerate-key' && request.method === 'POST') {
+			const result = await handleRegenerateKey(request, env);
+			return json(result.data || { error: result.error }, result.code, cors);
+		}
 		if (url.pathname === '/auth/stripe-success' && request.method === 'GET') {
 			const result = await handleStripeSuccess(request, env);
 			return json(result.data || { error: result.error }, result.code, cors);
@@ -971,6 +989,30 @@ export default {
 		// ── Stripe webhook ───────────────────────────────────────────
 		if (url.pathname === '/webhooks/stripe' && request.method === 'POST') {
 			const result = await handleStripeWebhook(request, env);
+			return json(result.data || { error: result.error }, result.code, cors);
+		}
+
+		// ── Public Content API routes ────────────────────────────────
+		// These are publicly readable (no auth required)
+		if (url.pathname === '/v1/content/blog' && request.method === 'GET') {
+			const result = await handleListBlogPosts(env, url.searchParams);
+			return json(result.data, result.code, cors);
+		}
+
+		if (url.pathname === '/v1/content/products' && request.method === 'GET') {
+			const result = await handleListProducts(env, url.searchParams);
+			return json(result.data, result.code, cors);
+		}
+
+		if (url.pathname === '/v1/content/datasets' && request.method === 'GET') {
+			const result = await handleListDatasets(env, url.searchParams);
+			return json(result.data, result.code, cors);
+		}
+
+		// Blog slug match (must be after /blog to avoid conflict with /blog/publish)
+		const publicBlogMatch = url.pathname.match(/^\/v1\/content\/blog\/([^/]+)$/);
+		if (publicBlogMatch && request.method === 'GET' && publicBlogMatch[1] !== 'publish') {
+			const result = await handleGetBlogPost(env, decodeURIComponent(publicBlogMatch[1]));
 			return json(result.data || { error: result.error }, result.code, cors);
 		}
 
@@ -1096,9 +1138,279 @@ export default {
 			return json(result.data || { error: result.error }, result.code, headers);
 		}
 
+		// ── Authenticated Content API routes ─────────────────────────
+		// Publish a blog post (requires auth + admin)
+		if (url.pathname === '/v1/content/blog/publish' && request.method === 'POST') {
+			const body = await request.json();
+			const result = await handlePublishBlogPost(env, keyData, body);
+			return json(result.data || { error: result.error }, result.code, headers);
+		}
+
 		return json({ error: 'Not found' }, 404, headers);
 	},
 };
+
+// ── Supabase REST helper ─────────────────────────────────────────
+// Direct REST API calls to Supabase (no SDK needed in Workers)
+async function supabaseQuery(env, table, { select = '*', filters = [], order, limit, single = false } = {}) {
+	const baseUrl = env.SUPABASE_URL;
+	const key = env.SUPABASE_SERVICE_KEY;
+
+	if (!baseUrl || !key) {
+		return { data: null, error: 'Supabase not configured' };
+	}
+
+	const params = new URLSearchParams();
+	params.set('select', select);
+	for (const f of filters) params.append(f.col, f.op + '.' + f.val);
+	if (order) params.set('order', order);
+	if (limit) params.set('limit', String(limit));
+
+	const headers = {
+		'apikey': key,
+		'Authorization': `Bearer ${key}`,
+		'Content-Type': 'application/json',
+		'Prefer': single ? 'return=representation, count=exact' : 'return=representation',
+	};
+	if (single) headers['Accept'] = 'application/vnd.pgrst.object+json';
+
+	const resp = await fetch(`${baseUrl}/rest/v1/${table}?${params}`, { headers });
+
+	if (!resp.ok) {
+		const err = await resp.text();
+		return { data: null, error: `Supabase error: ${resp.status} ${err}` };
+	}
+
+	const data = await resp.json();
+	return { data, error: null };
+}
+
+async function supabaseUpdate(env, table, id, updates) {
+	const baseUrl = env.SUPABASE_URL;
+	const key = env.SUPABASE_SERVICE_KEY;
+
+	const resp = await fetch(`${baseUrl}/rest/v1/${table}?id=eq.${id}`, {
+		method: 'PATCH',
+		headers: {
+			'apikey': key,
+			'Authorization': `Bearer ${key}`,
+			'Content-Type': 'application/json',
+			'Prefer': 'return=representation',
+		},
+		body: JSON.stringify(updates),
+	});
+
+	if (!resp.ok) {
+		const err = await resp.text();
+		return { data: null, error: `Update failed: ${resp.status} ${err}` };
+	}
+
+	return { data: await resp.json(), error: null };
+}
+
+// ── Content API handlers ─────────────────────────────────────────
+
+async function handleListBlogPosts(env, params) {
+	const limit = Math.min(parseInt(params.get('limit') || '20'), 100);
+	const offset = parseInt(params.get('offset') || '0');
+
+	const { data, error } = await supabaseQuery(env, 'content_pipeline', {
+		select: 'id,title,notes,external_urls,published_at,tags,campaign_id,created_at',
+		filters: [
+			{ col: 'type', op: 'eq', val: 'blog' },
+			{ col: 'status', op: 'eq', val: 'published' },
+		],
+		order: 'published_at.desc',
+		limit: limit,
+	});
+
+	if (error) return { data: { error }, code: 500 };
+
+	const posts = (data || []).map(item => ({
+		id: item.id,
+		title: item.external_urls?.seo_title || item.title,
+		slug: item.external_urls?.blog_slug || slugify(item.title),
+		excerpt: item.external_urls?.seo_description || (item.notes || '').slice(0, 200),
+		content: item.notes || '',
+		published_at: item.published_at,
+		author: 'Tyrin Barney',
+		tags: item.tags || [],
+		image: item.external_urls?.image_url || null,
+		url: item.external_urls?.blog_url || `https://eternium.ai/blog/${item.external_urls?.blog_slug || slugify(item.title)}`,
+	}));
+
+	return { data: { posts, count: posts.length, offset }, code: 200 };
+}
+
+async function handleGetBlogPost(env, slug) {
+	const { data, error } = await supabaseQuery(env, 'content_pipeline', {
+		select: 'id,title,notes,external_urls,published_at,tags,campaign_id,created_at',
+		filters: [
+			{ col: 'type', op: 'eq', val: 'blog' },
+			{ col: 'status', op: 'eq', val: 'published' },
+			{ col: 'external_urls->>blog_slug', op: 'eq', val: slug },
+		],
+		single: true,
+	});
+
+	if (error || !data) return { data: null, error: 'Blog post not found', code: 404 };
+
+	return {
+		data: {
+			id: data.id,
+			title: data.external_urls?.seo_title || data.title,
+			slug: data.external_urls?.blog_slug || slug,
+			content: data.notes || '',
+			excerpt: data.external_urls?.seo_description || '',
+			published_at: data.published_at,
+			author: 'Tyrin Barney',
+			tags: data.tags || [],
+			image: data.external_urls?.image_url || null,
+			seo: {
+				title: data.external_urls?.seo_title || data.title,
+				description: data.external_urls?.seo_description || '',
+			},
+		},
+		code: 200,
+	};
+}
+
+async function handlePublishBlogPost(env, keyData, body) {
+	// Only admin or internal tier can publish
+	const adminEmail = env.ADMIN_EMAIL || 'ty@eternium.ai';
+	if (keyData.email !== adminEmail && keyData.tier !== 'internal') {
+		return { data: null, error: 'Admin access required to publish blog posts', code: 403 };
+	}
+
+	const { item_id, title, content, seo_title, seo_description, tags, image_url } = body;
+
+	if (item_id) {
+		// Publish existing pipeline item
+		const slug = slugify(seo_title || title || 'untitled');
+		const now = new Date().toISOString();
+		const blogUrl = `https://eternium.ai/blog/${slug}`;
+
+		const { error } = await supabaseUpdate(env, 'content_pipeline', item_id, {
+			status: 'published',
+			published_at: now,
+			published_url: blogUrl,
+			external_urls: {
+				blog_slug: slug,
+				blog_url: blogUrl,
+				blog_published_at: now,
+				seo_title: seo_title || title,
+				seo_description: seo_description || '',
+				image_url: image_url || null,
+			},
+		});
+
+		if (error) return { data: null, error, code: 500 };
+		return { data: { slug, url: blogUrl, published_at: now }, code: 200 };
+	}
+
+	// Create new blog post directly via API
+	if (!title || !content) {
+		return { data: null, error: 'title and content are required', code: 400 };
+	}
+
+	const slug = slugify(seo_title || title);
+	const now = new Date().toISOString();
+	const blogUrl = `https://eternium.ai/blog/${slug}`;
+
+	const baseUrl = env.SUPABASE_URL;
+	const key = env.SUPABASE_SERVICE_KEY;
+
+	const resp = await fetch(`${baseUrl}/rest/v1/content_pipeline`, {
+		method: 'POST',
+		headers: {
+			'apikey': key,
+			'Authorization': `Bearer ${key}`,
+			'Content-Type': 'application/json',
+			'Prefer': 'return=representation',
+		},
+		body: JSON.stringify({
+			title,
+			type: 'blog',
+			status: 'published',
+			platforms: ['website'],
+			notes: content,
+			tags: tags || [],
+			published_at: now,
+			published_url: blogUrl,
+			external_urls: {
+				blog_slug: slug,
+				blog_url: blogUrl,
+				blog_published_at: now,
+				seo_title: seo_title || title,
+				seo_description: seo_description || '',
+				image_url: image_url || null,
+			},
+		}),
+	});
+
+	if (!resp.ok) {
+		const err = await resp.text();
+		return { data: null, error: `Failed to create blog post: ${err}`, code: 500 };
+	}
+
+	const created = await resp.json();
+	return { data: { id: created[0]?.id, slug, url: blogUrl, published_at: now }, code: 201 };
+}
+
+async function handleListProducts(env, params) {
+	const category = params.get('category');
+	const filters = [
+		{ col: 'is_productized', op: 'eq', val: 'true' },
+	];
+	if (category) filters.push({ col: 'category', op: 'eq', val: category });
+
+	const { data, error } = await supabaseQuery(env, 'datasets', {
+		select: 'id,name,description,category,pricing_tier,status,metadata',
+		filters,
+		order: 'category,name',
+	});
+
+	if (error) return { data: { error }, code: 500 };
+
+	const products = (data || []).map(d => ({
+		id: d.id,
+		name: d.name,
+		description: d.description,
+		category: d.category,
+		tier: d.pricing_tier,
+		status: d.status,
+		download_url: d.metadata?.download_url || null,
+		preview_url: d.metadata?.preview_url || null,
+	}));
+
+	return { data: { products, count: products.length }, code: 200 };
+}
+
+async function handleListDatasets(env, params) {
+	const category = params.get('category');
+	const filters = [];
+	if (category) filters.push({ col: 'category', op: 'eq', val: category });
+
+	const { data, error } = await supabaseQuery(env, 'datasets', {
+		select: 'id,name,description,category,is_productized,pricing_tier,status',
+		filters,
+		order: 'category,name',
+		limit: 100,
+	});
+
+	if (error) return { data: { error }, code: 500 };
+	return { data: { datasets: data || [], count: (data || []).length }, code: 200 };
+}
+
+function slugify(text) {
+	return (text || 'untitled')
+		.toLowerCase()
+		.replace(/[^a-z0-9\s-]/g, '')
+		.replace(/\s+/g, '-')
+		.replace(/-+/g, '-')
+		.replace(/^-|-$/g, '')
+		.slice(0, 80);
+}
 
 function json(data, status = 200, extraHeaders = {}) {
 	return new Response(JSON.stringify(data, null, 2), {
