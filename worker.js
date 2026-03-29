@@ -48,7 +48,6 @@ const KIE_COSTS = {
 	'nano-banana-2':    0.045,
 	'nano-banana-pro':  0.03,
 	'gpt-5.4-image':    0.05,
-	'gpt4o-image':      0.05,
 	'flux-kontext':     0.04,
 	'seedream-5':       0.03,
 	'qwen-image-2':     0.03,
@@ -69,8 +68,6 @@ const OPENAI_COSTS = {
 	'gpt-5.1':             { input: 0.63,  output: 5.00 },
 	'gpt-5.1-codex-mini':  { input: 0.25,  output: 2.00 },
 	'gpt-5.4':             { input: 1.25,  output: 10.00 },
-	'gpt-4o':              { input: 2.50,  output: 10.00 },  // legacy/sunset
-	'gpt-4o-mini':         { input: 0.15,  output: 0.60 },   // legacy/sunset
 	'text-embedding-3-small': { input: 0.02, output: 0 },
 	'text-embedding-3-large': { input: 0.13, output: 0 },
 	'whisper-1':           { perMinute: 0.006 },
@@ -166,12 +163,6 @@ const MODELS = {
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 11,
 	},
-	'gpt4o-image': {
-		type: 'image', name: 'GPT-4o Image', provider: 'OpenAI',
-		description: 'OpenAI GPT-4o image generation',
-		defaults: { aspectRatio: '1:1' },
-		credits_per_gen: 14,
-	},
 	'qwen-image-2': {
 		type: 'image', name: 'Qwen Image 2.0', provider: 'Qwen',
 		description: 'Qwen image generation with strong text rendering',
@@ -253,19 +244,6 @@ const MODELS = {
 		pricing: { input_per_1m: 1.25, output_per_1m: 10.00 },
 		featured: true,
 	},
-	'gpt-4o': {
-		type: 'chat', name: 'GPT-4o (Legacy)', provider: 'OpenAI',
-		description: 'Legacy model — sunset Feb 2026. Use GPT-5.1 instead.',
-		pricing: { input_per_1m: 2.50, output_per_1m: 10.00 },
-		deprecated: true,
-	},
-	'gpt-4o-mini': {
-		type: 'chat', name: 'GPT-4o Mini (Legacy)', provider: 'OpenAI',
-		description: 'Legacy compact model — sunset Feb 2026. Use GPT-5.1-Codex-Mini instead.',
-		pricing: { input_per_1m: 0.15, output_per_1m: 0.60 },
-		deprecated: true,
-	},
-
 	// ── Embedding Models ──
 	'text-embedding-3-small': {
 		type: 'embedding', name: 'Text Embedding 3 Small', provider: 'OpenAI',
@@ -318,8 +296,8 @@ const PIPELINES = {
 		name: 'Thumbnail Pack',
 		description: 'Generate 4 YouTube thumbnail variations',
 		steps: [
-			{ model: 'gpt4o-image', promptTemplate: '{prompt}, YouTube thumbnail, bold text, high contrast, clickbait style, 16:9', overrides: { aspect_ratio: '16:9' } },
-			{ model: 'gpt4o-image', promptTemplate: '{prompt}, YouTube thumbnail, dramatic reaction, vibrant colors, 16:9', overrides: { aspect_ratio: '16:9' } },
+			{ model: 'gpt-5.4-image', promptTemplate: '{prompt}, YouTube thumbnail, bold text, high contrast, clickbait style, 16:9', overrides: { aspect_ratio: '16:9' } },
+			{ model: 'gpt-5.4-image', promptTemplate: '{prompt}, YouTube thumbnail, dramatic reaction, vibrant colors, 16:9', overrides: { aspect_ratio: '16:9' } },
 			{ model: 'nano-banana-pro', promptTemplate: '{prompt}, thumbnail, cinematic still, dramatic lighting', overrides: { aspect_ratio: '16:9' } },
 			{ model: 'flux-kontext', promptTemplate: '{prompt}, YouTube thumbnail, bold composition, eye-catching', overrides: { aspect_ratio: '16:9' } },
 		],
@@ -468,8 +446,6 @@ const OPENROUTER_MODELS = {
 	'gpt-5.1':            'openai/gpt-4.1',           // closest available
 	'gpt-5.1-codex-mini': 'openai/gpt-4.1-mini',
 	'gpt-5.4':            'openai/gpt-4.1',           // closest available
-	'gpt-4o':             'openai/gpt-4o',
-	'gpt-4o-mini':        'openai/gpt-4o-mini',
 };
 
 async function openaiProxy(path, request, env, keyData) {
@@ -731,7 +707,6 @@ function buildKieBody(model, prompt, params) {
 		'nano-banana-2':   'nano-banana-2/generate',
 		'nano-banana-pro': 'nano-banana-pro',
 		'gpt-5.4-image':   'gpt-5.4/generate',
-		'gpt4o-image':     'gpt4o-image/generate',
 		'flux-kontext':    'flux-kontext/generate',
 		'seedream-5':      'seedream-5.0-lite/generate',
 		'qwen-image-2':    'qwen-image-2.0/generate',
