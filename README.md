@@ -35,8 +35,15 @@ See [DEPLOY.md](DEPLOY.md) for full deployment instructions.
 | GET | `/v1/tasks/:id` | Yes | Check task status |
 | GET | `/v1/tasks/:id/download` | Yes | Get download URL |
 | GET | `/v1/usage` | Yes | Get usage and budget |
-| POST | `/auth/signup` | No | Create account |
-| POST | `/auth/login` | No | Sign in |
+| POST | `/v1/chat/completions` | Yes | OpenAI-compatible chat proxy (streaming supported) |
+| POST | `/v1/embeddings` | Yes | OpenAI-compatible embeddings proxy |
+| POST | `/v1/audio/transcriptions` | Yes | Whisper audio transcription (multipart) |
+| POST | `/auth/signup` | No | Create account, returns JWT |
+| POST | `/auth/login` | No | Sign in, returns JWT + API key |
+| POST | `/auth/provision-key` | JWT | Generate API key (first time) |
+| POST | `/auth/regenerate-key` | JWT | Rotate API key (revokes old, issues new) |
+| POST | `/auth/checkout` | JWT | Create Stripe checkout session |
+| GET | `/auth/stripe-success` | No | Post-payment redirect handler |
 
 ## SDKs
 

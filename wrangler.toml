@@ -35,8 +35,16 @@ id = "4495ba1e13004534b0e40dd4ad9a35fd"
 binding = "CACHE"
 id = "ca36ec423ccc4eb2b3d67ef1a3d202d5"
 
+# ── Supabase (Content API) ──────────────────────────────────────
+# Required for /v1/content/* endpoints (blog, products, datasets)
+# Set via CLI:
+#   wrangler secret put SUPABASE_URL
+#   wrangler secret put SUPABASE_SERVICE_KEY
+
 # ── Secrets (set via CLI: wrangler secret put <NAME>) ────────────
 # KIE_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, JWT_SECRET
+# OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
+# OPENROUTER_API_KEY  (optional — fallback for chat/embeddings if OpenAI is down)
 
 [assets]
 directory = "./public"

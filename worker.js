@@ -5,6 +5,7 @@
  *
  * Environment variables (Cloudflare Dashboard or wrangler secret):
  *   KIE_API_KEY            — Kie.ai API key
+ *   OPENAI_API_KEY         — OpenAI API key (for chat, embeddings, audio proxy)
  *   STRIPE_SECRET_KEY      — Stripe API key
  *   STRIPE_WEBHOOK_SECRET  — Stripe webhook signing secret
  *   JWT_SECRET             — Session token secret
@@ -18,7 +19,7 @@
  */
 
 import {
-	handleSignup, handleLogin, handleCheckout, handleProvisionKey,
+	handleSignup, handleLogin, handleCheckout, handleProvisionKey, handleRegenerateKey,
 	handleStripeSuccess, handleStripeWebhook,
 	handleAdminOverview, handleAdminRevoke, handleAdminActivate,
 } from './auth.js';
@@ -27,14 +28,17 @@ const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
 const CREDIT_VALUE = 0.005; // 1 credit = $0.005 (200 credits per dollar)
 
-const ALLOWED_ORIGINS = [
+// CORS: Open to all origins. Security is enforced by API key authentication,
+// not by origin restrictions. Every major API (OpenAI, Stripe, Twilio) does this.
+// CORS is a browser-only mechanism and provides zero protection against
+// server-side callers. The API key in X-API-Key header is the auth boundary.
+//
+// Sensitive internal origins get explicit matching for Vary/caching correctness.
+const INTERNAL_ORIGINS = new Set([
 	'https://eternium.ai',
 	'https://api.eternium.ai',
 	'https://helix.eternium.ai',
-	'http://localhost:3000',
-	'http://localhost:5173',
-	'http://localhost:8787',
-];
+]);
 
 // ── Kie.ai base costs (USD) ────────────────────────────────────
 // Image models: flat per-image cost
@@ -60,17 +64,30 @@ const KIE_COSTS = {
 	'seedance-2':   { std: { 5: 0.35, 10: 0.70 }, pro: { 5: 0.55, 10: 1.10 } },
 };
 
+// ── OpenAI base costs (USD per 1M tokens) ──────────────────────
+const OPENAI_COSTS = {
+	'gpt-5.1':             { input: 0.63,  output: 5.00 },
+	'gpt-5.1-codex-mini':  { input: 0.25,  output: 2.00 },
+	'gpt-5.4':             { input: 1.25,  output: 10.00 },
+	'gpt-4o':              { input: 2.50,  output: 10.00 },  // legacy/sunset
+	'gpt-4o-mini':         { input: 0.15,  output: 0.60 },   // legacy/sunset
+	'text-embedding-3-small': { input: 0.02, output: 0 },
+	'text-embedding-3-large': { input: 0.13, output: 0 },
+	'whisper-1':           { perMinute: 0.006 },
+};
+
 // ── Markup multipliers ──────────────────────────────────────────
-const MARKUP = { image: 1.35, video: 1.30 };
+const MARKUP = { image: 1.35, video: 1.30, chat: 1.30, embedding: 1.20, audio: 1.25 };
+const PARTNER_MARKUP = 1.18; // flat 18% across all types for partner-tier clients
 
 // ── Cost → credits (returns integer) ────────────────────────────
 function getGenerationCost(model, params = {}, keyTier = null) {
 	const base = KIE_COSTS[model];
 	if (!base) return 0;
-	const noMarkup = keyTier === 'internal';
+	const mul = keyTier === 'internal' ? 1 : keyTier === 'partner' ? PARTNER_MARKUP : null;
 
 	if (typeof base === 'number') {
-		const usd = base * (noMarkup ? 1 : MARKUP.image);
+		const usd = base * (mul ?? MARKUP.image);
 		return Math.ceil(usd / CREDIT_VALUE);
 	}
 
@@ -79,8 +96,30 @@ function getGenerationCost(model, params = {}, keyTier = null) {
 	const duration = params.duration || 5;
 	const tier = base[mode] || base[Object.keys(base)[0]];
 	const raw = tier[duration] || tier[Object.keys(tier)[0]];
-	const usd = raw * (noMarkup ? 1 : MARKUP.video);
+	const usd = raw * (mul ?? MARKUP.video);
 	return Math.ceil(usd / CREDIT_VALUE);
+}
+
+// ── Chat/embedding/audio cost → credits ─────────────────────────
+function getChatCost(model, inputTokens = 0, outputTokens = 0, keyTier = null) {
+	const costs = OPENAI_COSTS[model];
+	if (!costs) return 0;
+	const mul = keyTier === 'internal' ? 1 : keyTier === 'partner' ? PARTNER_MARKUP : null;
+
+	// Audio: per-minute pricing
+	if (costs.perMinute !== undefined) {
+		const usd = costs.perMinute * Math.max(1, inputTokens);
+		const markup = mul ?? MARKUP.audio;
+		return Math.max(2, Math.ceil((usd * markup) / CREDIT_VALUE));
+	}
+
+	// Chat / embedding: per-token pricing
+	const inputCost = (inputTokens / 1_000_000) * costs.input;
+	const outputCost = (outputTokens / 1_000_000) * (costs.output || 0);
+	const usd = inputCost + outputCost;
+	const markupType = costs.output > 0 ? 'chat' : 'embedding';
+	const markup = mul ?? MARKUP[markupType];
+	return Math.max(1, Math.ceil((usd * markup) / CREDIT_VALUE));
 }
 
 // ── Tier definitions (credits, not dollars) ─────────────────────
@@ -90,6 +129,7 @@ const TIERS = {
 	builder:    { name: 'Builder',    monthlyCredits: 12400,     rateLimit: 45,  concurrentTasks: 10 },
 	scale:      { name: 'Scale',      monthlyCredits: 33000,     rateLimit: 60,  concurrentTasks: 20 },
 	enterprise: { name: 'Enterprise', monthlyCredits: 200000,    rateLimit: 120, concurrentTasks: 50 },
+	partner:    { name: 'Partner',    monthlyCredits: 500000,    rateLimit: 120, concurrentTasks: 50 },
 	internal:   { name: 'Internal',   monthlyCredits: 2000000,   rateLimit: 200, concurrentTasks: 100 },
 };
 
@@ -193,6 +233,56 @@ const MODELS = {
 		description: 'High-quality video generation with audio support',
 		defaults: { duration: 5, aspect_ratio: '16:9', mode: 'std', sound: false },
 		credits_per_gen: '73-234',
+	},
+
+	// ── Chat Models ──
+	'gpt-5.1': {
+		type: 'chat', name: 'GPT-5.1', provider: 'OpenAI',
+		description: 'OpenAI GPT-5.1 — fast, capable chat model for classification, extraction, and generation',
+		pricing: { input_per_1m: 0.63, output_per_1m: 5.00 },
+		featured: true,
+	},
+	'gpt-5.1-codex-mini': {
+		type: 'chat', name: 'GPT-5.1 Codex Mini', provider: 'OpenAI',
+		description: 'Compact GPT-5.1 variant — budget-friendly for simple classification and extraction',
+		pricing: { input_per_1m: 0.25, output_per_1m: 2.00 },
+	},
+	'gpt-5.4': {
+		type: 'chat', name: 'GPT-5.4', provider: 'OpenAI',
+		description: 'OpenAI frontier model — maximum capability for complex reasoning',
+		pricing: { input_per_1m: 1.25, output_per_1m: 10.00 },
+		featured: true,
+	},
+	'gpt-4o': {
+		type: 'chat', name: 'GPT-4o (Legacy)', provider: 'OpenAI',
+		description: 'Legacy model — sunset Feb 2026. Use GPT-5.1 instead.',
+		pricing: { input_per_1m: 2.50, output_per_1m: 10.00 },
+		deprecated: true,
+	},
+	'gpt-4o-mini': {
+		type: 'chat', name: 'GPT-4o Mini (Legacy)', provider: 'OpenAI',
+		description: 'Legacy compact model — sunset Feb 2026. Use GPT-5.1-Codex-Mini instead.',
+		pricing: { input_per_1m: 0.15, output_per_1m: 0.60 },
+		deprecated: true,
+	},
+
+	// ── Embedding Models ──
+	'text-embedding-3-small': {
+		type: 'embedding', name: 'Text Embedding 3 Small', provider: 'OpenAI',
+		description: 'Fast, efficient embeddings for semantic search and RAG',
+		pricing: { input_per_1m: 0.02 },
+	},
+	'text-embedding-3-large': {
+		type: 'embedding', name: 'Text Embedding 3 Large', provider: 'OpenAI',
+		description: 'High-dimensional embeddings for maximum retrieval accuracy',
+		pricing: { input_per_1m: 0.13 },
+	},
+
+	// ── Audio Models ──
+	'whisper-1': {
+		type: 'audio', name: 'Whisper', provider: 'OpenAI',
+		description: 'Speech-to-text transcription with multi-language support',
+		pricing: { per_minute: 0.006 },
 	},
 };
 
@@ -339,8 +429,13 @@ function corsHeaders(origin) {
 		'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, DELETE',
 		'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
 		'Access-Control-Max-Age': '86400',
+		// Vary: Origin ensures CDN/browser caches don't mix responses across origins
+		'Vary': 'Origin',
 	};
-	if (ALLOWED_ORIGINS.includes(origin)) {
+	if (origin) {
+		// Allow all origins. API key auth is the security boundary, not CORS.
+		// Credentials (cookies) are never used — omitting Access-Control-Allow-Credentials
+		// prevents browsers from sending ambient credentials cross-origin.
 		headers['Access-Control-Allow-Origin'] = origin;
 	}
 	return headers;
@@ -362,6 +457,268 @@ async function kieGet(path, env) {
 		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.KIE_API_KEY}` },
 	});
 	return res.json();
+}
+
+// ── OpenAI proxy with OpenRouter fallback ──────────────────────
+const OPENAI_BASE = 'https://api.openai.com/v1';
+const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
+
+// OpenRouter model mapping (our slug -> OpenRouter model ID)
+const OPENROUTER_MODELS = {
+	'gpt-5.1':            'openai/gpt-4.1',           // closest available
+	'gpt-5.1-codex-mini': 'openai/gpt-4.1-mini',
+	'gpt-5.4':            'openai/gpt-4.1',           // closest available
+	'gpt-4o':             'openai/gpt-4o',
+	'gpt-4o-mini':        'openai/gpt-4o-mini',
+};
+
+async function openaiProxy(path, request, env, keyData) {
+	if (!env.OPENAI_API_KEY) {
+		return { error: 'OpenAI API key not configured', code: 503 };
+	}
+
+	const contentType = request.headers.get('Content-Type') || '';
+	const isMultipart = contentType.includes('multipart/form-data');
+
+	// Forward the request to OpenAI
+	const upstreamHeaders = {
+		'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+	};
+	if (!isMultipart) {
+		upstreamHeaders['Content-Type'] = 'application/json';
+	} else {
+		upstreamHeaders['Content-Type'] = contentType;
+	}
+
+	const upstreamRes = await fetch(`${OPENAI_BASE}${path}`, {
+		method: 'POST',
+		headers: upstreamHeaders,
+		body: request.body,
+	});
+
+	return upstreamRes;
+}
+
+// Fallback to OpenRouter when OpenAI fails (5xx / network error)
+async function openrouterFallback(path, body, env) {
+	if (!env.OPENROUTER_API_KEY) return null;
+
+	// Remap model for OpenRouter compatibility
+	const orModel = OPENROUTER_MODELS[body.model] || body.model;
+	const orBody = { ...body, model: orModel };
+
+	try {
+		const res = await fetch(`${OPENROUTER_BASE}${path}`, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${env.OPENROUTER_API_KEY}`,
+				'Content-Type': 'application/json',
+				'HTTP-Referer': 'https://api.eternium.ai',
+				'X-Title': 'Eternium API',
+			},
+			body: JSON.stringify(orBody),
+		});
+		if (res.ok) return res;
+	} catch { /* OpenRouter also failed */ }
+	return null;
+}
+
+async function handleChatCompletions(request, env, keyData) {
+	let body;
+	try {
+		// Clone request so we can read body AND forward it
+		const cloned = request.clone();
+		body = await cloned.json();
+	} catch {
+		return { response: json({ error: 'Invalid JSON body' }, 400) };
+	}
+
+	const model = body.model || 'gpt-5.1';
+	if (!OPENAI_COSTS[model]) {
+		return { response: json({ error: `Unknown chat model: ${model}. Available: ${Object.keys(OPENAI_COSTS).filter(m => !OPENAI_COSTS[m].perMinute).join(', ')}` }, 400) };
+	}
+
+	const isStreaming = body.stream === true;
+
+	// Pre-estimate budget (rough: ~1000 tokens input for classification tasks)
+	const estimatedCredits = getChatCost(model, 1000, 500, keyData.tier);
+	const budget = await checkBudget(env, keyData.key, keyData.tier, estimatedCredits);
+	if (!budget.allowed) {
+		return { response: json({ error: 'Monthly credit limit reached.', usage: { spent: budget.spent, limit: budget.limit } }, 402) };
+	}
+
+	// Inject stream_options for usage tracking on streaming
+	if (isStreaming && !body.stream_options) {
+		body.stream_options = { include_usage: true };
+	}
+
+	// Forward to OpenAI (with OpenRouter fallback on 5xx)
+	let upstreamRes;
+	try {
+		upstreamRes = await fetch(`${OPENAI_BASE}/chat/completions`, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(body),
+		});
+	} catch (e) {
+		// Network error -- try OpenRouter
+		upstreamRes = null;
+	}
+
+	// Fallback to OpenRouter on server error or network failure
+	if (!upstreamRes || upstreamRes.status >= 500) {
+		const fallback = await openrouterFallback('/chat/completions', body, env);
+		if (fallback) upstreamRes = fallback;
+	}
+
+	if (!upstreamRes || !upstreamRes.ok) {
+		const errBody = upstreamRes ? await upstreamRes.text() : '{"error":"All providers unavailable"}';
+		const errStatus = upstreamRes ? upstreamRes.status : 503;
+		return { response: new Response(errBody, { status: errStatus, headers: { 'Content-Type': 'application/json' } }) };
+	}
+
+	if (isStreaming) {
+		// Stream through, track usage from the final chunk
+		const { readable, writable } = new TransformStream();
+		const writer = writable.getWriter();
+		const reader = upstreamRes.body.getReader();
+		const decoder = new TextDecoder();
+		const encoder = new TextEncoder();
+
+		(async () => {
+			try {
+				let buffer = '';
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					const chunk = decoder.decode(value, { stream: true });
+					buffer += chunk;
+					await writer.write(value);
+
+					// Look for usage in SSE data
+					const lines = buffer.split('\n');
+					buffer = lines.pop() || '';
+					for (const line of lines) {
+						if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+							try {
+								const parsed = JSON.parse(line.slice(6));
+								if (parsed.usage) {
+									const credits = getChatCost(model, parsed.usage.prompt_tokens || 0, parsed.usage.completion_tokens || 0, keyData.tier);
+									await trackUsage(env, keyData.key, credits, model, false);
+								}
+							} catch { /* not JSON or no usage */ }
+						}
+					}
+				}
+			} catch { /* stream error */ }
+			finally { await writer.close(); }
+		})();
+
+		return {
+			response: new Response(readable, {
+				status: 200,
+				headers: {
+					'Content-Type': 'text/event-stream',
+					'Cache-Control': 'no-cache',
+					'Connection': 'keep-alive',
+				},
+			}),
+		};
+	}
+
+	// Non-streaming: parse response, track usage, return verbatim
+	const data = await upstreamRes.json();
+	if (data.usage) {
+		const credits = getChatCost(model, data.usage.prompt_tokens || 0, data.usage.completion_tokens || 0, keyData.tier);
+		await trackUsage(env, keyData.key, credits, model, false);
+	}
+
+	return { response: new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }) };
+}
+
+async function handleEmbeddings(request, env, keyData) {
+	let body;
+	try {
+		const cloned = request.clone();
+		body = await cloned.json();
+	} catch {
+		return { response: json({ error: 'Invalid JSON body' }, 400) };
+	}
+
+	const model = body.model || 'text-embedding-3-small';
+
+	// Budget check
+	const estimatedCredits = getChatCost(model, 500, 0, keyData.tier);
+	const budget = await checkBudget(env, keyData.key, keyData.tier, estimatedCredits);
+	if (!budget.allowed) {
+		return { response: json({ error: 'Monthly credit limit reached.' }, 402) };
+	}
+
+	let upstreamRes;
+	try {
+		upstreamRes = await fetch(`${OPENAI_BASE}/embeddings`, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(body),
+		});
+	} catch { upstreamRes = null; }
+
+	if (!upstreamRes || upstreamRes.status >= 500) {
+		const fallback = await openrouterFallback('/embeddings', body, env);
+		if (fallback) upstreamRes = fallback;
+	}
+
+	if (!upstreamRes || !upstreamRes.ok) {
+		const errBody = upstreamRes ? await upstreamRes.text() : '{"error":"All providers unavailable"}';
+		return { response: new Response(errBody, { status: upstreamRes ? upstreamRes.status : 503, headers: { 'Content-Type': 'application/json' } }) };
+	}
+
+	const data = await upstreamRes.json();
+	if (data.usage) {
+		const credits = getChatCost(model, data.usage.prompt_tokens || data.usage.total_tokens || 0, 0, keyData.tier);
+		await trackUsage(env, keyData.key, credits, model, false);
+	}
+
+	return { response: new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }) };
+}
+
+async function handleAudioTranscriptions(request, env, keyData) {
+	// Budget check (flat ~2 credits for short voice clips)
+	const estimatedCredits = getChatCost('whisper-1', 1, 0, keyData.tier); // 1 minute estimate
+	const budget = await checkBudget(env, keyData.key, keyData.tier, estimatedCredits);
+	if (!budget.allowed) {
+		return { response: json({ error: 'Monthly credit limit reached.' }, 402) };
+	}
+
+	// Forward multipart/form-data directly — pipe the body stream
+	const contentType = request.headers.get('Content-Type') || '';
+	const upstreamRes = await fetch(`${OPENAI_BASE}/audio/transcriptions`, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+			'Content-Type': contentType,
+		},
+		body: request.body,
+	});
+
+	if (!upstreamRes.ok) {
+		const errBody = await upstreamRes.text();
+		return { response: new Response(errBody, { status: upstreamRes.status, headers: { 'Content-Type': 'application/json' } }) };
+	}
+
+	// Track usage (flat cost per transcription)
+	await trackUsage(env, keyData.key, estimatedCredits, 'whisper-1', false);
+
+	// Return verbatim
+	const responseBody = await upstreamRes.text();
+	const responseContentType = upstreamRes.headers.get('Content-Type') || 'application/json';
+	return { response: new Response(responseBody, { status: 200, headers: { 'Content-Type': responseContentType } }) };
 }
 
 // ── Build Kie request body from our params ──────────────────────
@@ -590,6 +947,7 @@ export default {
 				docs: 'https://api.eternium.ai/docs',
 				models: Object.keys(MODELS).length,
 				pipelines: Object.keys(PIPELINES).length,
+				content_api: !!env.SUPABASE_URL,
 			}, 200, cors);
 		}
 
@@ -634,6 +992,9 @@ export default {
 				endpoints: {
 					'POST /v1/generate': { description: 'Generate image or video', body: { model: 'string', prompt: 'string', cache: 'boolean (default true)', '...': 'model-specific' } },
 					'POST /v1/pipelines/run': { description: 'Run a multi-step pipeline', body: { pipeline: 'string', prompt: 'string' } },
+					'POST /v1/chat/completions': { description: 'OpenAI-compatible chat completions proxy (supports streaming)', body: { model: 'string', messages: 'array', stream: 'boolean' } },
+					'POST /v1/embeddings': { description: 'OpenAI-compatible embeddings proxy', body: { model: 'string', input: 'string|array' } },
+					'POST /v1/audio/transcriptions': { description: 'OpenAI-compatible audio transcription proxy', body: 'multipart/form-data with file + model' },
 					'GET /v1/tasks/:id': { description: 'Check task status' },
 					'GET /v1/tasks/:id/download': { description: 'Get download URL (expires 20m)' },
 					'GET /v1/models': { description: 'List all models (includes provider, featured flag, credits)' },
@@ -641,6 +1002,11 @@ export default {
 					'GET /v1/pipelines': { description: 'List available pipelines' },
 					'GET /v1/tiers': { description: 'List pricing tiers with credit allotments' },
 					'GET /v1/usage': { description: 'Get your credit usage & budget (authenticated)' },
+					'GET /v1/content/blog': { description: 'List published blog posts', query: { limit: 'number (max 100)', offset: 'number' } },
+					'GET /v1/content/blog/:slug': { description: 'Get a blog post by slug' },
+					'POST /v1/content/blog/publish': { description: 'Publish a blog post (admin only)', body: { item_id: 'uuid', title: 'string', content: 'markdown', seo_title: 'string', seo_description: 'string' } },
+					'GET /v1/content/products': { description: 'List productized datasets and templates', query: { category: 'string' } },
+					'GET /v1/content/datasets': { description: 'List all datasets', query: { category: 'string' } },
 				},
 				models: Object.entries(MODELS).map(([id, m]) => ({
 					id, type: m.type, name: m.name, provider: m.provider, credits_per_gen: m.credits_per_gen, featured: m.featured || false,
@@ -666,6 +1032,10 @@ export default {
 			const result = await handleProvisionKey(request, env);
 			return json(result.data || { error: result.error }, result.code, cors);
 		}
+		if (url.pathname === '/auth/regenerate-key' && request.method === 'POST') {
+			const result = await handleRegenerateKey(request, env);
+			return json(result.data || { error: result.error }, result.code, cors);
+		}
 		if (url.pathname === '/auth/stripe-success' && request.method === 'GET') {
 			const result = await handleStripeSuccess(request, env);
 			return json(result.data || { error: result.error }, result.code, cors);
@@ -674,6 +1044,30 @@ export default {
 		// ── Stripe webhook ───────────────────────────────────────────
 		if (url.pathname === '/webhooks/stripe' && request.method === 'POST') {
 			const result = await handleStripeWebhook(request, env);
+			return json(result.data || { error: result.error }, result.code, cors);
+		}
+
+		// ── Public Content API routes ────────────────────────────────
+		// These are publicly readable (no auth required)
+		if (url.pathname === '/v1/content/blog' && request.method === 'GET') {
+			const result = await handleListBlogPosts(env, url.searchParams);
+			return json(result.data, result.code, cors);
+		}
+
+		if (url.pathname === '/v1/content/products' && request.method === 'GET') {
+			const result = await handleListProducts(env, url.searchParams);
+			return json(result.data, result.code, cors);
+		}
+
+		if (url.pathname === '/v1/content/datasets' && request.method === 'GET') {
+			const result = await handleListDatasets(env, url.searchParams);
+			return json(result.data, result.code, cors);
+		}
+
+		// Blog slug match (must be after /blog to avoid conflict with /blog/publish)
+		const publicBlogMatch = url.pathname.match(/^\/v1\/content\/blog\/([^/]+)$/);
+		if (publicBlogMatch && request.method === 'GET' && publicBlogMatch[1] !== 'publish') {
+			const result = await handleGetBlogPost(env, decodeURIComponent(publicBlogMatch[1]));
 			return json(result.data || { error: result.error }, result.code, cors);
 		}
 
@@ -734,6 +1128,33 @@ export default {
 
 		const headers = { ...cors, ...rlHeaders };
 
+		// ── OpenAI-compatible routes (chat, embeddings, audio) ──────
+		// POST /v1/chat/completions
+		if (url.pathname === '/v1/chat/completions' && request.method === 'POST') {
+			const result = await handleChatCompletions(request, env, keyData);
+			// Add rate limit + CORS headers to the response
+			const resHeaders = new Headers(result.response.headers);
+			for (const [k, v] of Object.entries(headers)) resHeaders.set(k, v);
+			return new Response(result.response.body, { status: result.response.status, headers: resHeaders });
+		}
+
+		// POST /v1/embeddings
+		if (url.pathname === '/v1/embeddings' && request.method === 'POST') {
+			const result = await handleEmbeddings(request, env, keyData);
+			const resHeaders = new Headers(result.response.headers);
+			for (const [k, v] of Object.entries(headers)) resHeaders.set(k, v);
+			return new Response(result.response.body, { status: result.response.status, headers: resHeaders });
+		}
+
+		// POST /v1/audio/transcriptions
+		if (url.pathname === '/v1/audio/transcriptions' && request.method === 'POST') {
+			const result = await handleAudioTranscriptions(request, env, keyData);
+			const resHeaders = new Headers(result.response.headers);
+			for (const [k, v] of Object.entries(headers)) resHeaders.set(k, v);
+			return new Response(result.response.body, { status: result.response.status, headers: resHeaders });
+		}
+
+		// ── Kie.ai generation routes ────────────────────────────────
 		// POST /v1/generate
 		if (url.pathname === '/v1/generate' && request.method === 'POST') {
 			let body;
@@ -772,9 +1193,279 @@ export default {
 			return json(result.data || { error: result.error }, result.code, headers);
 		}
 
+		// ── Authenticated Content API routes ─────────────────────────
+		// Publish a blog post (requires auth + admin)
+		if (url.pathname === '/v1/content/blog/publish' && request.method === 'POST') {
+			const body = await request.json();
+			const result = await handlePublishBlogPost(env, keyData, body);
+			return json(result.data || { error: result.error }, result.code, headers);
+		}
+
 		return json({ error: 'Not found' }, 404, headers);
 	},
 };
+
+// ── Supabase REST helper ─────────────────────────────────────────
+// Direct REST API calls to Supabase (no SDK needed in Workers)
+async function supabaseQuery(env, table, { select = '*', filters = [], order, limit, single = false } = {}) {
+	const baseUrl = env.SUPABASE_URL;
+	const key = env.SUPABASE_SERVICE_KEY;
+
+	if (!baseUrl || !key) {
+		return { data: null, error: 'Supabase not configured' };
+	}
+
+	const params = new URLSearchParams();
+	params.set('select', select);
+	for (const f of filters) params.append(f.col, f.op + '.' + f.val);
+	if (order) params.set('order', order);
+	if (limit) params.set('limit', String(limit));
+
+	const headers = {
+		'apikey': key,
+		'Authorization': `Bearer ${key}`,
+		'Content-Type': 'application/json',
+		'Prefer': single ? 'return=representation, count=exact' : 'return=representation',
+	};
+	if (single) headers['Accept'] = 'application/vnd.pgrst.object+json';
+
+	const resp = await fetch(`${baseUrl}/rest/v1/${table}?${params}`, { headers });
+
+	if (!resp.ok) {
+		const err = await resp.text();
+		return { data: null, error: `Supabase error: ${resp.status} ${err}` };
+	}
+
+	const data = await resp.json();
+	return { data, error: null };
+}
+
+async function supabaseUpdate(env, table, id, updates) {
+	const baseUrl = env.SUPABASE_URL;
+	const key = env.SUPABASE_SERVICE_KEY;
+
+	const resp = await fetch(`${baseUrl}/rest/v1/${table}?id=eq.${id}`, {
+		method: 'PATCH',
+		headers: {
+			'apikey': key,
+			'Authorization': `Bearer ${key}`,
+			'Content-Type': 'application/json',
+			'Prefer': 'return=representation',
+		},
+		body: JSON.stringify(updates),
+	});
+
+	if (!resp.ok) {
+		const err = await resp.text();
+		return { data: null, error: `Update failed: ${resp.status} ${err}` };
+	}
+
+	return { data: await resp.json(), error: null };
+}
+
+// ── Content API handlers ─────────────────────────────────────────
+
+async function handleListBlogPosts(env, params) {
+	const limit = Math.min(parseInt(params.get('limit') || '20'), 100);
+	const offset = parseInt(params.get('offset') || '0');
+
+	const { data, error } = await supabaseQuery(env, 'content_pipeline', {
+		select: 'id,title,notes,external_urls,published_at,tags,campaign_id,created_at',
+		filters: [
+			{ col: 'type', op: 'eq', val: 'blog' },
+			{ col: 'status', op: 'eq', val: 'published' },
+		],
+		order: 'published_at.desc',
+		limit: limit,
+	});
+
+	if (error) return { data: { error }, code: 500 };
+
+	const posts = (data || []).map(item => ({
+		id: item.id,
+		title: item.external_urls?.seo_title || item.title,
+		slug: item.external_urls?.blog_slug || slugify(item.title),
+		excerpt: item.external_urls?.seo_description || (item.notes || '').slice(0, 200),
+		content: item.notes || '',
+		published_at: item.published_at,
+		author: 'Tyrin Barney',
+		tags: item.tags || [],
+		image: item.external_urls?.image_url || null,
+		url: item.external_urls?.blog_url || `https://eternium.ai/blog/${item.external_urls?.blog_slug || slugify(item.title)}`,
+	}));
+
+	return { data: { posts, count: posts.length, offset }, code: 200 };
+}
+
+async function handleGetBlogPost(env, slug) {
+	const { data, error } = await supabaseQuery(env, 'content_pipeline', {
+		select: 'id,title,notes,external_urls,published_at,tags,campaign_id,created_at',
+		filters: [
+			{ col: 'type', op: 'eq', val: 'blog' },
+			{ col: 'status', op: 'eq', val: 'published' },
+			{ col: 'external_urls->>blog_slug', op: 'eq', val: slug },
+		],
+		single: true,
+	});
+
+	if (error || !data) return { data: null, error: 'Blog post not found', code: 404 };
+
+	return {
+		data: {
+			id: data.id,
+			title: data.external_urls?.seo_title || data.title,
+			slug: data.external_urls?.blog_slug || slug,
+			content: data.notes || '',
+			excerpt: data.external_urls?.seo_description || '',
+			published_at: data.published_at,
+			author: 'Tyrin Barney',
+			tags: data.tags || [],
+			image: data.external_urls?.image_url || null,
+			seo: {
+				title: data.external_urls?.seo_title || data.title,
+				description: data.external_urls?.seo_description || '',
+			},
+		},
+		code: 200,
+	};
+}
+
+async function handlePublishBlogPost(env, keyData, body) {
+	// Only admin or internal tier can publish
+	const adminEmail = env.ADMIN_EMAIL || 'ty@eternium.ai';
+	if (keyData.email !== adminEmail && keyData.tier !== 'internal') {
+		return { data: null, error: 'Admin access required to publish blog posts', code: 403 };
+	}
+
+	const { item_id, title, content, seo_title, seo_description, tags, image_url } = body;
+
+	if (item_id) {
+		// Publish existing pipeline item
+		const slug = slugify(seo_title || title || 'untitled');
+		const now = new Date().toISOString();
+		const blogUrl = `https://eternium.ai/blog/${slug}`;
+
+		const { error } = await supabaseUpdate(env, 'content_pipeline', item_id, {
+			status: 'published',
+			published_at: now,
+			published_url: blogUrl,
+			external_urls: {
+				blog_slug: slug,
+				blog_url: blogUrl,
+				blog_published_at: now,
+				seo_title: seo_title || title,
+				seo_description: seo_description || '',
+				image_url: image_url || null,
+			},
+		});
+
+		if (error) return { data: null, error, code: 500 };
+		return { data: { slug, url: blogUrl, published_at: now }, code: 200 };
+	}
+
+	// Create new blog post directly via API
+	if (!title || !content) {
+		return { data: null, error: 'title and content are required', code: 400 };
+	}
+
+	const slug = slugify(seo_title || title);
+	const now = new Date().toISOString();
+	const blogUrl = `https://eternium.ai/blog/${slug}`;
+
+	const baseUrl = env.SUPABASE_URL;
+	const key = env.SUPABASE_SERVICE_KEY;
+
+	const resp = await fetch(`${baseUrl}/rest/v1/content_pipeline`, {
+		method: 'POST',
+		headers: {
+			'apikey': key,
+			'Authorization': `Bearer ${key}`,
+			'Content-Type': 'application/json',
+			'Prefer': 'return=representation',
+		},
+		body: JSON.stringify({
+			title,
+			type: 'blog',
+			status: 'published',
+			platforms: ['website'],
+			notes: content,
+			tags: tags || [],
+			published_at: now,
+			published_url: blogUrl,
+			external_urls: {
+				blog_slug: slug,
+				blog_url: blogUrl,
+				blog_published_at: now,
+				seo_title: seo_title || title,
+				seo_description: seo_description || '',
+				image_url: image_url || null,
+			},
+		}),
+	});
+
+	if (!resp.ok) {
+		const err = await resp.text();
+		return { data: null, error: `Failed to create blog post: ${err}`, code: 500 };
+	}
+
+	const created = await resp.json();
+	return { data: { id: created[0]?.id, slug, url: blogUrl, published_at: now }, code: 201 };
+}
+
+async function handleListProducts(env, params) {
+	const category = params.get('category');
+	const filters = [
+		{ col: 'is_productized', op: 'eq', val: 'true' },
+	];
+	if (category) filters.push({ col: 'category', op: 'eq', val: category });
+
+	const { data, error } = await supabaseQuery(env, 'datasets', {
+		select: 'id,name,description,category,pricing_tier,status,metadata',
+		filters,
+		order: 'category,name',
+	});
+
+	if (error) return { data: { error }, code: 500 };
+
+	const products = (data || []).map(d => ({
+		id: d.id,
+		name: d.name,
+		description: d.description,
+		category: d.category,
+		tier: d.pricing_tier,
+		status: d.status,
+		download_url: d.metadata?.download_url || null,
+		preview_url: d.metadata?.preview_url || null,
+	}));
+
+	return { data: { products, count: products.length }, code: 200 };
+}
+
+async function handleListDatasets(env, params) {
+	const category = params.get('category');
+	const filters = [];
+	if (category) filters.push({ col: 'category', op: 'eq', val: category });
+
+	const { data, error } = await supabaseQuery(env, 'datasets', {
+		select: 'id,name,description,category,is_productized,pricing_tier,status',
+		filters,
+		order: 'category,name',
+		limit: 100,
+	});
+
+	if (error) return { data: { error }, code: 500 };
+	return { data: { datasets: data || [], count: (data || []).length }, code: 200 };
+}
+
+function slugify(text) {
+	return (text || 'untitled')
+		.toLowerCase()
+		.replace(/[^a-z0-9\s-]/g, '')
+		.replace(/\s+/g, '-')
+		.replace(/-+/g, '-')
+		.replace(/^-|-$/g, '')
+		.slice(0, 80);
+}
 
 function json(data, status = 200, extraHeaders = {}) {
 	return new Response(JSON.stringify(data, null, 2), {
