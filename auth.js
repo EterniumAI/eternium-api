@@ -297,7 +297,7 @@ export async function handleProvisionKey(request, env) {
 
 	// Don't allow re-provisioning if key exists (they should use regenerate)
 	if (user.apiKey) {
-		return { error: 'API key already exists. Use /auth/regenerate-key to get a new one.', code: 409 };
+		return { error: 'API key already exists. Use POST /auth/regenerate-key to rotate it.', code: 409 };
 	}
 
 	const tier = body.tier || user.tier || 'free';
@@ -308,6 +308,41 @@ export async function handleProvisionKey(request, env) {
 	await saveUser(env, user);
 
 	return { data: { api_key: apiKey, tier }, code: 200 };
+}
+
+export async function handleRegenerateKey(request, env) {
+	const authHeader = request.headers.get('Authorization') || '';
+	const token = authHeader.replace('Bearer ', '');
+	if (!env.JWT_SECRET) return { error: 'Server misconfigured', code: 500 };
+
+	const payload = await verifyJWT(token, env.JWT_SECRET);
+	if (!payload) return { error: 'Not authenticated', code: 401 };
+
+	const user = await getUser(env, payload.sub);
+	if (!user) return { error: 'User not found', code: 404 };
+	if (!user.apiKey) return { error: 'No API key to regenerate. Use POST /auth/provision-key first.', code: 404 };
+
+	// Revoke old key from API_KEYS KV
+	const oldKey = user.apiKey;
+	if (env.API_KEYS) {
+		await env.API_KEYS.delete(`key:${oldKey}`);
+	}
+
+	// Provision new key with same tier
+	const tier = user.tier || 'free';
+	const newKey = await provisionKey(env, user.email, tier, user.name);
+
+	user.apiKey = newKey;
+	await saveUser(env, user);
+
+	return {
+		data: {
+			api_key: newKey,
+			tier,
+			message: 'New API key generated. Your old key has been revoked immediately.',
+		},
+		code: 200,
+	};
 }
 
 export async function handleStripeSuccess(request, env) {

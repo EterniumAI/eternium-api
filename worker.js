@@ -459,8 +459,18 @@ async function kieGet(path, env) {
 	return res.json();
 }
 
-// ── OpenAI proxy (chat, embeddings, audio) ──────────────────────
+// ── OpenAI proxy with OpenRouter fallback ──────────────────────
 const OPENAI_BASE = 'https://api.openai.com/v1';
+const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
+
+// OpenRouter model mapping (our slug -> OpenRouter model ID)
+const OPENROUTER_MODELS = {
+	'gpt-5.1':            'openai/gpt-4.1',           // closest available
+	'gpt-5.1-codex-mini': 'openai/gpt-4.1-mini',
+	'gpt-5.4':            'openai/gpt-4.1',           // closest available
+	'gpt-4o':             'openai/gpt-4o',
+	'gpt-4o-mini':        'openai/gpt-4o-mini',
+};
 
 async function openaiProxy(path, request, env, keyData) {
 	if (!env.OPENAI_API_KEY) {
@@ -487,6 +497,30 @@ async function openaiProxy(path, request, env, keyData) {
 	});
 
 	return upstreamRes;
+}
+
+// Fallback to OpenRouter when OpenAI fails (5xx / network error)
+async function openrouterFallback(path, body, env) {
+	if (!env.OPENROUTER_API_KEY) return null;
+
+	// Remap model for OpenRouter compatibility
+	const orModel = OPENROUTER_MODELS[body.model] || body.model;
+	const orBody = { ...body, model: orModel };
+
+	try {
+		const res = await fetch(`${OPENROUTER_BASE}${path}`, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${env.OPENROUTER_API_KEY}`,
+				'Content-Type': 'application/json',
+				'HTTP-Referer': 'https://api.eternium.ai',
+				'X-Title': 'Eternium API',
+			},
+			body: JSON.stringify(orBody),
+		});
+		if (res.ok) return res;
+	} catch { /* OpenRouter also failed */ }
+	return null;
 }
 
 async function handleChatCompletions(request, env, keyData) {
@@ -518,19 +552,32 @@ async function handleChatCompletions(request, env, keyData) {
 		body.stream_options = { include_usage: true };
 	}
 
-	// Forward to OpenAI
-	const upstreamRes = await fetch(`${OPENAI_BASE}/chat/completions`, {
-		method: 'POST',
-		headers: {
-			'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify(body),
-	});
+	// Forward to OpenAI (with OpenRouter fallback on 5xx)
+	let upstreamRes;
+	try {
+		upstreamRes = await fetch(`${OPENAI_BASE}/chat/completions`, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(body),
+		});
+	} catch (e) {
+		// Network error -- try OpenRouter
+		upstreamRes = null;
+	}
 
-	if (!upstreamRes.ok) {
-		const errBody = await upstreamRes.text();
-		return { response: new Response(errBody, { status: upstreamRes.status, headers: { 'Content-Type': 'application/json' } }) };
+	// Fallback to OpenRouter on server error or network failure
+	if (!upstreamRes || upstreamRes.status >= 500) {
+		const fallback = await openrouterFallback('/chat/completions', body, env);
+		if (fallback) upstreamRes = fallback;
+	}
+
+	if (!upstreamRes || !upstreamRes.ok) {
+		const errBody = upstreamRes ? await upstreamRes.text() : '{"error":"All providers unavailable"}';
+		const errStatus = upstreamRes ? upstreamRes.status : 503;
+		return { response: new Response(errBody, { status: errStatus, headers: { 'Content-Type': 'application/json' } }) };
 	}
 
 	if (isStreaming) {
@@ -610,18 +657,26 @@ async function handleEmbeddings(request, env, keyData) {
 		return { response: json({ error: 'Monthly credit limit reached.' }, 402) };
 	}
 
-	const upstreamRes = await fetch(`${OPENAI_BASE}/embeddings`, {
-		method: 'POST',
-		headers: {
-			'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify(body),
-	});
+	let upstreamRes;
+	try {
+		upstreamRes = await fetch(`${OPENAI_BASE}/embeddings`, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(body),
+		});
+	} catch { upstreamRes = null; }
 
-	if (!upstreamRes.ok) {
-		const errBody = await upstreamRes.text();
-		return { response: new Response(errBody, { status: upstreamRes.status, headers: { 'Content-Type': 'application/json' } }) };
+	if (!upstreamRes || upstreamRes.status >= 500) {
+		const fallback = await openrouterFallback('/embeddings', body, env);
+		if (fallback) upstreamRes = fallback;
+	}
+
+	if (!upstreamRes || !upstreamRes.ok) {
+		const errBody = upstreamRes ? await upstreamRes.text() : '{"error":"All providers unavailable"}';
+		return { response: new Response(errBody, { status: upstreamRes ? upstreamRes.status : 503, headers: { 'Content-Type': 'application/json' } }) };
 	}
 
 	const data = await upstreamRes.json();

@@ -43,7 +43,8 @@ id = "ca36ec423ccc4eb2b3d67ef1a3d202d5"
 
 # ── Secrets (set via CLI: wrangler secret put <NAME>) ────────────
 # KIE_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, JWT_SECRET
-# SUPABASE_URL, SUPABASE_SERVICE_KEY
+# OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
+# OPENROUTER_API_KEY  (optional — fallback for chat/embeddings if OpenAI is down)
 
 [assets]
 directory = "./public"
