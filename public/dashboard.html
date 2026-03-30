@@ -6,63 +6,109 @@
 <title>Eternium API — Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #050505; --surface: #0a0a0a; --border: rgba(255,255,255,0.1); --text: #e8e8e8; --muted: #7a8ba0; --accent: #18b5f0; --accent2: #0d52bc; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --code-bg: #080c10; }
+  :root { --bg: #050505; --surface: #0a0a0a; --surface2: #111114; --border: rgba(255,255,255,0.08); --text: #e8e8e8; --muted: #7a8ba0; --accent: #18b5f0; --accent2: #0d52bc; --green: #10b981; --red: #ef4444; --yellow: #eab308; --code-bg: #080c10; --emerald: #10b981; --emerald-dim: rgba(16,185,129,0.1); }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Montserrat', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
-  .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 2rem 1.5rem; }
 
   /* Auth */
   #auth-screen { text-align: center; padding: 6rem 0; }
-  #auth-screen h1 { font-size: 2rem; font-weight: 800; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 1rem; }
-  #auth-screen input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.75rem 1rem; border-radius: 8px; width: 320px; font-size: 1rem; margin-bottom: 1rem; display: block; margin-left: auto; margin-right: auto; }
-  #auth-screen button { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border: none; padding: 0.75rem 2rem; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 600; }
+  #auth-screen h1 { font-size: 2rem; font-weight: 800; background: linear-gradient(135deg, var(--emerald), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; }
+  #auth-screen p { color: var(--muted); margin-bottom: 2rem; }
+  #auth-screen input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.75rem 1rem; border-radius: 8px; width: 320px; font-size: 1rem; margin-bottom: 1rem; display: block; margin-left: auto; margin-right: auto; font-family: 'JetBrains Mono', monospace; }
+  #auth-screen button { background: var(--emerald); color: #000; border: none; padding: 0.75rem 2rem; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 700; }
   #auth-screen button:hover { opacity: 0.9; }
   #auth-error { color: var(--red); margin-top: 0.5rem; font-size: 0.9rem; }
+  .auth-links { margin-top: 1.5rem; color: var(--muted); font-size: 0.85rem; }
+  .auth-links a { color: var(--accent); text-decoration: none; } .auth-links a:hover { text-decoration: underline; }
 
   /* Dashboard */
   #dashboard { display: none; }
-  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
-  header h1 { font-size: 1.5rem; color: var(--accent); }
-  .tier-badge { background: var(--accent); color: #fff; font-size: 0.75rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 9999px; }
-  .logout { background: none; border: 1px solid var(--border); color: var(--muted); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
-  .logout:hover { border-color: var(--red); color: var(--red); }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+  header h1 { font-size: 1.5rem; color: var(--emerald); font-weight: 800; }
+  .tier-badge { font-size: 0.7rem; font-weight: 700; padding: 0.25rem 0.7rem; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .tier-free { background: rgba(255,255,255,0.1); color: var(--muted); }
+  .tier-starter { background: rgba(16,185,129,0.15); color: var(--emerald); border: 1px solid rgba(16,185,129,0.3); }
+  .tier-builder { background: rgba(16,185,129,0.2); color: var(--emerald); border: 1px solid rgba(16,185,129,0.4); }
+  .tier-scale { background: rgba(24,181,240,0.15); color: var(--accent); border: 1px solid rgba(24,181,240,0.3); }
+  .tier-enterprise, .tier-partner, .tier-internal { background: rgba(139,92,246,0.15); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); }
+  .header-right { display: flex; gap: 0.75rem; align-items: center; }
+  .btn-sm { background: none; border: 1px solid var(--border); color: var(--muted); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-family: 'Montserrat', sans-serif; }
+  .btn-sm:hover { border-color: var(--text); color: var(--text); }
+  .btn-danger:hover { border-color: var(--red); color: var(--red); }
 
   /* Stats grid */
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+  @media (max-width: 700px) { .stats { grid-template-columns: repeat(2, 1fr); } }
   .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
-  .stat-card .label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 0.25rem; }
-  .stat-card .value { font-size: 1.8rem; font-weight: 700; }
-  .stat-card .sub { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
-  .green { color: var(--green); }
-  .yellow { color: var(--yellow); }
-  .red { color: var(--red); }
+  .stat-card .label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 0.3rem; }
+  .stat-card .value { font-size: 1.6rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
+  .stat-card .sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem; }
+  .green { color: var(--green); } .yellow { color: var(--yellow); } .red { color: var(--red); }
 
   /* Budget bar */
-  .budget-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 2rem; }
-  .budget-bar h3 { font-size: 0.9rem; color: var(--muted); margin-bottom: 0.75rem; }
-  .bar-track { background: var(--code-bg); border-radius: 6px; height: 12px; overflow: hidden; }
+  .budget-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; }
+  .budget-bar h3 { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
+  .bar-track { background: var(--code-bg); border-radius: 6px; height: 10px; overflow: hidden; }
   .bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease; }
-  .bar-labels { display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted); }
+  .bar-labels { display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.75rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
 
-  /* Activity table */
-  .activity { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
-  .activity h3 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 1rem; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 0.5rem 0.75rem; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; }
-  .cached-badge { background: var(--green); color: #000; font-size: 0.7rem; font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 4px; }
+  /* Section panels */
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; }
+  .panel h3 { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 1rem; }
 
-  /* Code block */
-  .quick-start { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 2rem; }
-  .quick-start h3 { font-size: 0.9rem; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 0.75rem; }
+  /* API Key management */
+  .key-row { display: flex; align-items: center; gap: 0.75rem; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; }
+  .key-value { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; flex: 1; user-select: all; }
+  .key-actions { display: flex; gap: 0.5rem; }
+  .btn-icon { background: none; border: 1px solid var(--border); color: var(--muted); width: 32px; height: 32px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; }
+  .btn-icon:hover { border-color: var(--text); color: var(--text); }
+  .btn-icon.copied { border-color: var(--green); color: var(--green); }
+
+  /* Tier info */
+  .tier-info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  @media (max-width: 600px) { .tier-info { grid-template-columns: 1fr; } }
+  .tier-detail { text-align: center; padding: 0.75rem; }
+  .tier-detail .td-value { font-size: 1.3rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: var(--emerald); }
+  .tier-detail .td-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; margin-top: 0.2rem; }
+
+  /* Upgrade banner */
+  .upgrade-banner { background: linear-gradient(135deg, rgba(16,185,129,0.08), rgba(24,181,240,0.08)); border: 1px solid rgba(16,185,129,0.2); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+  .upgrade-banner p { color: var(--muted); font-size: 0.85rem; }
+  .upgrade-banner strong { color: var(--text); }
+  .btn-upgrade { background: var(--emerald); color: #000; border: none; padding: 0.5rem 1.5rem; border-radius: 6px; font-size: 0.85rem; cursor: pointer; font-weight: 700; text-decoration: none; }
+  .btn-upgrade:hover { opacity: 0.9; }
+
+  /* Confirm dialog */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; max-width: 420px; width: 90%; text-align: center; }
+  .modal h3 { font-size: 1.1rem; margin-bottom: 0.75rem; }
+  .modal p { color: var(--muted); font-size: 0.85rem; margin-bottom: 1.5rem; line-height: 1.5; }
+  .modal-actions { display: flex; gap: 0.75rem; justify-content: center; }
+  .btn-cancel { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+  .btn-confirm-danger { background: var(--red); color: #fff; border: none; padding: 0.5rem 1.5rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+
+  /* New key display */
+  .new-key-box { background: var(--code-bg); border: 2px solid var(--emerald); border-radius: 8px; padding: 1rem; margin: 1rem 0; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; word-break: break-all; user-select: all; color: var(--emerald); text-align: left; }
+  .warning-text { color: var(--yellow); font-size: 0.8rem; margin-top: 0.5rem; }
+
+  /* Code tabs */
   .tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
-  .tab { background: var(--code-bg); border: 1px solid var(--border); color: var(--muted); padding: 0.3rem 0.8rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
-  .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .tab { background: var(--code-bg); border: 1px solid var(--border); color: var(--muted); padding: 0.3rem 0.8rem; border-radius: 6px; cursor: pointer; font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; }
+  .tab.active { background: var(--emerald); color: #000; border-color: var(--emerald); }
   pre { background: var(--code-bg); border-radius: 6px; padding: 1rem; overflow-x: auto; font-size: 0.8rem; }
-  code { font-family: 'JetBrains Mono', 'Fira Code', monospace; color: var(--text); }
+  code { font-family: 'JetBrains Mono', monospace; color: var(--text); }
 
+  /* Activity */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; font-size: 0.8rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+  .cached-badge { background: var(--emerald); color: #000; font-size: 0.65rem; font-weight: 700; padding: 0.1rem 0.4rem; border-radius: 4px; }
   .empty { text-align: center; color: var(--muted); padding: 2rem; }
-  footer { text-align: center; padding: 2rem 0; color: var(--muted); font-size: 0.8rem; margin-top: 2rem; border-top: 1px solid var(--border); }
+
+  footer { text-align: center; padding: 2rem 0; color: var(--muted); font-size: 0.75rem; margin-top: 1rem; border-top: 1px solid var(--border); }
+  footer a { color: var(--accent); text-decoration: none; } footer a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -71,10 +117,13 @@
   <!-- Auth screen -->
   <div id="auth-screen">
     <h1>Eternium API Dashboard</h1>
-    <p style="color: var(--muted); margin-bottom: 2rem;">Enter your API key to view usage and manage your account.</p>
-    <input id="api-key-input" type="password" placeholder="etrn_your_api_key" autocomplete="off">
+    <p>Enter your API key to view usage and manage your account.</p>
+    <input id="api-key-input" type="password" placeholder="etrn_your_api_key" autocomplete="off" onkeydown="if(event.key==='Enter')authenticate()">
     <button onclick="authenticate()">Connect</button>
     <div id="auth-error"></div>
+    <div class="auth-links">
+      Don't have a key? <a href="/signup">Sign up free</a> &middot; <a href="/docs">API Docs</a>
+    </div>
   </div>
 
   <!-- Dashboard -->
@@ -82,11 +131,12 @@
     <header>
       <div>
         <h1>Dashboard</h1>
-        <span id="key-name" style="color: var(--muted); font-size: 0.85rem;"></span>
+        <span id="key-name" style="color: var(--muted); font-size: 0.8rem; font-family: 'JetBrains Mono', monospace;"></span>
       </div>
-      <div style="display: flex; gap: 0.75rem; align-items: center;">
+      <div class="header-right">
         <span class="tier-badge" id="tier-badge"></span>
-        <button class="logout" onclick="logout()">Disconnect</button>
+        <button class="btn-sm" onclick="refreshDashboard()">Refresh</button>
+        <button class="btn-sm btn-danger" onclick="logout()">Disconnect</button>
       </div>
     </header>
 
@@ -94,23 +144,23 @@
     <div class="stats">
       <div class="stat-card">
         <div class="label">Spent This Month</div>
-        <div class="value" id="stat-spent">$0.00</div>
-        <div class="sub" id="stat-spent-sub"></div>
+        <div class="value" id="stat-spent">0</div>
+        <div class="sub" id="stat-spent-sub">credits</div>
       </div>
       <div class="stat-card">
         <div class="label">Remaining</div>
-        <div class="value green" id="stat-remaining">$0.00</div>
+        <div class="value green" id="stat-remaining">0</div>
         <div class="sub" id="stat-remaining-sub"></div>
       </div>
       <div class="stat-card">
         <div class="label">Generations</div>
         <div class="value" id="stat-generations">0</div>
-        <div class="sub" id="stat-gen-sub"></div>
+        <div class="sub" id="stat-gen-sub">this month</div>
       </div>
       <div class="stat-card">
-        <div class="label">Cache Savings</div>
-        <div class="value green" id="stat-cache">$0.00</div>
-        <div class="sub" id="stat-cache-sub"></div>
+        <div class="label">Cache Hits</div>
+        <div class="value green" id="stat-cache">0</div>
+        <div class="sub" id="stat-cache-sub">saved at 0 credits</div>
       </div>
     </div>
 
@@ -121,24 +171,67 @@
         <div class="bar-fill" id="budget-fill" style="width: 0%; background: var(--green);"></div>
       </div>
       <div class="bar-labels">
-        <span id="budget-spent">$0.00 used</span>
-        <span id="budget-limit">$0.00 limit</span>
+        <span id="budget-spent">0 used</span>
+        <span id="budget-limit">0 limit</span>
+      </div>
+    </div>
+
+    <!-- Upgrade banner (hidden for paid tiers) -->
+    <div class="upgrade-banner" id="upgrade-banner" style="display: none;">
+      <div>
+        <p><strong>Upgrade your plan</strong> to get more credits, higher rate limits, and more concurrent tasks.</p>
+      </div>
+      <a href="/signup" class="btn-upgrade">Upgrade Plan</a>
+    </div>
+
+    <!-- API Key Management -->
+    <div class="panel">
+      <h3>API Key</h3>
+      <div class="key-row">
+        <span class="key-value" id="key-display"></span>
+        <div class="key-actions">
+          <button class="btn-icon" id="btn-copy" onclick="copyKey()" title="Copy to clipboard">&#128203;</button>
+          <button class="btn-icon" id="btn-toggle" onclick="toggleKeyVisibility()" title="Show/hide key">&#128065;</button>
+        </div>
+      </div>
+      <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button class="btn-sm" onclick="showRegenModal()" style="border-color: var(--yellow); color: var(--yellow);">Regenerate Key</button>
+      </div>
+      <p style="font-size: 0.75rem; color: var(--muted); margin-top: 0.75rem;">Your API key authenticates all requests. Keep it secret. If compromised, regenerate immediately.</p>
+    </div>
+
+    <!-- Tier Details -->
+    <div class="panel">
+      <h3>Plan Details</h3>
+      <div class="tier-info">
+        <div class="tier-detail">
+          <div class="td-value" id="tier-credits">0</div>
+          <div class="td-label">Credits / Month</div>
+        </div>
+        <div class="tier-detail">
+          <div class="td-value" id="tier-rate">0</div>
+          <div class="td-label">Requests / Min</div>
+        </div>
+        <div class="tier-detail">
+          <div class="td-value" id="tier-concurrent">0</div>
+          <div class="td-label">Concurrent Tasks</div>
+        </div>
       </div>
     </div>
 
     <!-- Quick start -->
-    <div class="quick-start">
+    <div class="panel">
       <h3>Quick Start</h3>
       <div class="tabs">
-        <div class="tab active" onclick="showTab('js')">JavaScript</div>
-        <div class="tab" onclick="showTab('py')">Python</div>
-        <div class="tab" onclick="showTab('curl')">cURL</div>
+        <div class="tab active" onclick="showTab('js', this)">JavaScript</div>
+        <div class="tab" onclick="showTab('py', this)">Python</div>
+        <div class="tab" onclick="showTab('curl', this)">cURL</div>
       </div>
       <pre id="code-js"><code>import { Eternium } from 'eternium-sdk'
 
-const client = new Eternium('<span class="key-display">YOUR_KEY</span>')
+const client = new Eternium('<span class="key-mask">YOUR_KEY</span>')
 
-// Generate image — waits and returns download URL
+// Generate image
 const img = await client.image('A mountain landscape, golden hour')
 console.log(img.url)
 
@@ -146,57 +239,74 @@ console.log(img.url)
 const vid = await client.video('Drone flyover of a city at night')
 console.log(vid.url)
 
-// Run a pipeline — 3 product shots in one call
+// Run a pipeline
 const pack = await client.runPipeline('product-shot', 'White sneakers')
 pack.results.forEach(r => console.log(r.url))</code></pre>
       <pre id="code-py" style="display:none;"><code>from eternium import Eternium
 
-client = Eternium("<span class="key-display">YOUR_KEY</span>")
+client = Eternium("<span class="key-mask">YOUR_KEY</span>")
 
-# Generate image — waits and returns download URL
 img = client.image("A mountain landscape, golden hour")
 print(img["url"])
 
-# Generate video
 vid = client.video("Drone flyover of a city at night")
 print(vid["url"])
 
-# Run a pipeline — 3 product shots in one call
 pack = client.run_pipeline("product-shot", "White sneakers")
 for r in pack["results"]:
     print(r["url"])</code></pre>
       <pre id="code-curl" style="display:none;"><code>curl -X POST https://api.eternium.ai/v1/generate \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: <span class="key-display">YOUR_KEY</span>" \
-  -d '{"model":"nano-banana-pro","prompt":"A mountain landscape"}'
-
-# Check task status
-curl https://api.eternium.ai/v1/tasks/TASK_ID \
-  -H "X-API-Key: <span class="key-display">YOUR_KEY</span>"
-
-# Get download URL
-curl https://api.eternium.ai/v1/tasks/TASK_ID/download \
-  -H "X-API-Key: <span class="key-display">YOUR_KEY</span>"</code></pre>
+  -H "X-API-Key: <span class="key-mask">YOUR_KEY</span>" \
+  -d '{"model":"nano-banana-pro","prompt":"A mountain landscape"}'</code></pre>
+      <p style="font-size: 0.75rem; color: var(--muted); margin-top: 0.75rem;">Install: <code style="color: var(--emerald);">npm i eternium-sdk</code> or <code style="color: var(--emerald);">pip install eternium-sdk</code></p>
     </div>
 
     <!-- Activity -->
-    <div class="activity">
+    <div class="panel">
       <h3>Recent Activity</h3>
       <table>
-        <thead><tr><th>Model</th><th>Cost</th><th>Cache</th><th>Time</th></tr></thead>
+        <thead><tr><th>Model</th><th>Credits</th><th>Cache</th><th>Time</th></tr></thead>
         <tbody id="activity-body">
           <tr><td colspan="4" class="empty">No activity yet. Make your first API call!</td></tr>
         </tbody>
       </table>
     </div>
 
-    <footer>&copy; 2026 Eternium LLC. All rights reserved.</footer>
+    <footer>
+      <a href="/docs">Documentation</a> &middot; <a href="/signup">Manage Plan</a> &middot; <a href="https://eternium.ai">eternium.ai</a>
+      <br>&copy; 2026 Eternium LLC
+    </footer>
+  </div>
+</div>
+
+<!-- Regenerate Key Confirmation Modal -->
+<div class="modal-overlay" id="regen-modal">
+  <div class="modal">
+    <h3>Regenerate API Key?</h3>
+    <p>This will immediately revoke your current key and generate a new one. Any applications using the old key will stop working instantly.</p>
+    <div id="regen-result"></div>
+    <div class="modal-actions" id="regen-actions">
+      <button class="btn-cancel" onclick="closeRegenModal()">Cancel</button>
+      <button class="btn-confirm-danger" onclick="regenerateKey()">Regenerate</button>
+    </div>
   </div>
 </div>
 
 <script>
 const BASE = window.location.origin;
+const TIERS = {
+  free:       { credits: '400',     rate: '10',  concurrent: '2' },
+  starter:    { credits: '4,400',   rate: '30',  concurrent: '5' },
+  builder:    { credits: '12,400',  rate: '45',  concurrent: '10' },
+  scale:      { credits: '33,000',  rate: '60',  concurrent: '20' },
+  enterprise: { credits: '200,000', rate: '120', concurrent: '50' },
+  partner:    { credits: '500,000', rate: '120', concurrent: '50' },
+  internal:   { credits: '2,000,000', rate: '200', concurrent: '100' },
+};
+
 let currentKey = '';
+let keyVisible = false;
 
 function esc(s) {
   const d = document.createElement('div');
@@ -204,10 +314,16 @@ function esc(s) {
   return d.innerHTML;
 }
 
+function maskKey(key) {
+  if (!key || key.length < 12) return key;
+  return key.slice(0, 8) + '...' + key.slice(-4);
+}
+
 function authenticate() {
   const key = document.getElementById('api-key-input').value.trim();
   if (!key) return;
   currentKey = key;
+  document.getElementById('auth-error').textContent = '';
 
   fetch(`${BASE}/v1/usage`, { headers: { 'X-API-Key': key } })
     .then(r => {
@@ -223,9 +339,18 @@ function authenticate() {
     });
 }
 
+function refreshDashboard() {
+  if (!currentKey) return;
+  fetch(`${BASE}/v1/usage`, { headers: { 'X-API-Key': currentKey } })
+    .then(r => r.json())
+    .then(data => showDashboard(data))
+    .catch(() => {});
+}
+
 function logout() {
   localStorage.removeItem('etrn_key');
   currentKey = '';
+  keyVisible = false;
   document.getElementById('dashboard').style.display = 'none';
   document.getElementById('auth-screen').style.display = 'block';
   document.getElementById('api-key-input').value = '';
@@ -235,58 +360,148 @@ function showDashboard(data) {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
 
-  const maskedKey = currentKey.slice(0, 8) + '...' + currentKey.slice(-4);
+  const masked = maskKey(currentKey);
+  document.getElementById('key-name').textContent = masked;
 
-  document.getElementById('key-name').textContent = maskedKey;
-  document.getElementById('tier-badge').textContent = data.tier_name || data.tier || 'Free';
+  // Tier badge
+  const tier = (data.tier || 'free').toLowerCase();
+  const badge = document.getElementById('tier-badge');
+  badge.textContent = data.tier_name || tier.charAt(0).toUpperCase() + tier.slice(1);
+  badge.className = 'tier-badge tier-' + tier;
+
+  // Stats
   const spent = data.spent || 0;
-  const limit = data.monthly_limit || 1;
-  const remaining = data.remaining || 0;
+  const limit = data.monthly_limit || 400;
+  const remaining = data.remaining ?? (limit - spent);
 
-  document.getElementById('stat-spent').textContent = spent.toLocaleString() + ' cr';
-  document.getElementById('stat-remaining').textContent = remaining.toLocaleString() + ' cr';
-  document.getElementById('stat-remaining-sub').textContent = `of ${limit.toLocaleString()} credits`;
+  document.getElementById('stat-spent').textContent = spent.toLocaleString();
+  document.getElementById('stat-spent-sub').textContent = 'credits';
+  document.getElementById('stat-remaining').textContent = remaining.toLocaleString();
+  document.getElementById('stat-remaining-sub').textContent = `of ${limit.toLocaleString()}`;
   document.getElementById('stat-generations').textContent = data.generations || 0;
-  document.getElementById('stat-cache').textContent = (data.cached_hits || 0) + ' hits';
-  document.getElementById('stat-cache-sub').textContent = `${data.cached_hits || 0} at 0 credits`;
+  document.getElementById('stat-cache').textContent = data.cached_hits || data.cached || 0;
 
   // Budget bar
   const pct = Math.min((spent / limit) * 100, 100);
   const fill = document.getElementById('budget-fill');
   fill.style.width = pct + '%';
   fill.style.background = pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--green)';
-  document.getElementById('budget-spent').textContent = `${spent.toLocaleString()} credits used`;
-  document.getElementById('budget-limit').textContent = `${limit.toLocaleString()} credit limit`;
+  document.getElementById('budget-spent').textContent = `${spent.toLocaleString()} used`;
+  document.getElementById('budget-limit').textContent = `${limit.toLocaleString()} limit`;
 
-  // Key display in code
-  document.querySelectorAll('.key-display').forEach(el => el.textContent = maskedKey);
+  // API Key display
+  document.getElementById('key-display').textContent = keyVisible ? currentKey : masked;
+
+  // Key in code examples
+  document.querySelectorAll('.key-mask').forEach(el => el.textContent = masked);
+
+  // Tier details
+  const tierInfo = TIERS[tier] || TIERS.free;
+  document.getElementById('tier-credits').textContent = tierInfo.credits;
+  document.getElementById('tier-rate').textContent = tierInfo.rate;
+  document.getElementById('tier-concurrent').textContent = tierInfo.concurrent;
+
+  // Upgrade banner
+  const upgradeBanner = document.getElementById('upgrade-banner');
+  if (tier === 'free' || tier === 'starter') {
+    upgradeBanner.style.display = 'flex';
+  } else {
+    upgradeBanner.style.display = 'none';
+  }
 
   // Activity table
-  const tasks = data.recent_tasks || [];
+  const tasks = data.recent_tasks || data.tasks || [];
   const tbody = document.getElementById('activity-body');
   if (tasks.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty">No activity yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">No activity yet. Make your first API call!</td></tr>';
   } else {
-    tbody.innerHTML = tasks.map(t => `
+    tbody.innerHTML = tasks.slice(0, 20).map(t => `
       <tr>
-        <td>${esc(t.model)}</td>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;">${esc(t.model)}</td>
         <td>${t.credits || t.cost || 0} cr</td>
-        <td>${t.cached ? '<span class="cached-badge">CACHED</span>' : '—'}</td>
-        <td>${timeAgo(t.ts)}</td>
+        <td>${t.cached ? '<span class="cached-badge">CACHED</span>' : '<span style="color:var(--muted);">—</span>'}</td>
+        <td style="color:var(--muted);">${timeAgo(t.ts)}</td>
       </tr>
     `).join('');
   }
 }
 
-function showTab(tab) {
+// Key management
+function copyKey() {
+  navigator.clipboard.writeText(currentKey).then(() => {
+    const btn = document.getElementById('btn-copy');
+    btn.classList.add('copied');
+    btn.innerHTML = '&#10003;';
+    setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = '&#128203;'; }, 2000);
+  });
+}
+
+function toggleKeyVisibility() {
+  keyVisible = !keyVisible;
+  document.getElementById('key-display').textContent = keyVisible ? currentKey : maskKey(currentKey);
+  document.getElementById('btn-toggle').style.color = keyVisible ? 'var(--emerald)' : '';
+}
+
+function showRegenModal() {
+  document.getElementById('regen-modal').classList.add('active');
+  document.getElementById('regen-result').innerHTML = '';
+  document.getElementById('regen-actions').innerHTML = `
+    <button class="btn-cancel" onclick="closeRegenModal()">Cancel</button>
+    <button class="btn-confirm-danger" onclick="regenerateKey()">Regenerate</button>
+  `;
+}
+
+function closeRegenModal() {
+  document.getElementById('regen-modal').classList.remove('active');
+}
+
+function regenerateKey() {
+  document.getElementById('regen-actions').innerHTML = '<span style="color:var(--muted);">Regenerating...</span>';
+
+  fetch(`${BASE}/auth/regenerate-key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
+  })
+    .then(r => {
+      if (!r.ok) throw new Error('Failed to regenerate key');
+      return r.json();
+    })
+    .then(data => {
+      const newKey = data.api_key || data.key;
+      if (!newKey) throw new Error('No key returned');
+
+      currentKey = newKey;
+      localStorage.setItem('etrn_key', newKey);
+      keyVisible = true;
+
+      document.getElementById('regen-result').innerHTML = `
+        <p style="color: var(--emerald); font-weight: 600; margin-bottom: 0.5rem;">New key generated!</p>
+        <div class="new-key-box">${esc(newKey)}</div>
+        <p class="warning-text">Copy this key now. You won't be able to see it again after closing this dialog.</p>
+      `;
+      document.getElementById('regen-actions').innerHTML = `
+        <button class="btn-cancel" onclick="navigator.clipboard.writeText('${esc(newKey)}');this.textContent='Copied!';this.style.borderColor='var(--emerald)';this.style.color='var(--emerald)';">Copy Key</button>
+        <button class="btn-cancel" onclick="closeRegenModal();refreshDashboard();">Done</button>
+      `;
+    })
+    .catch(err => {
+      document.getElementById('regen-result').innerHTML = `<p style="color: var(--red);">${esc(err.message)}</p>`;
+      document.getElementById('regen-actions').innerHTML = `
+        <button class="btn-cancel" onclick="closeRegenModal()">Close</button>
+      `;
+    });
+}
+
+function showTab(tab, el) {
   ['js', 'py', 'curl'].forEach(t => {
     document.getElementById('code-' + t).style.display = t === tab ? 'block' : 'none';
   });
-  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-  event.target.classList.add('active');
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
 }
 
 function timeAgo(ts) {
+  if (!ts) return '—';
   const diff = Date.now() - ts;
   if (diff < 60000) return 'just now';
   if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
