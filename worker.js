@@ -885,8 +885,52 @@ async function handleTaskStatus(taskId, env) {
 
 async function handleDownload(taskId, env) {
 	if (!taskId) return { error: 'task_id is required', code: 400 };
+
+	// Check R2 archive first — if already stored, return permanent URL immediately
+	if (env.MEDIA_STORAGE) {
+		const existing = await env.MEDIA_STORAGE.head(`generations/${taskId}`);
+		if (existing) {
+			const ext = (existing.httpMetadata?.contentType || '').includes('video') ? 'mp4' : 'png';
+			const permanentUrl = `https://api.eternium.ai/media/generations/${taskId}`;
+			return { data: { code: 200, data: { url: permanentUrl } }, code: 200 };
+		}
+	}
+
+	// Get temp URL from KIE
 	const result = await kieGet(`/common/download-url?taskId=${encodeURIComponent(taskId)}`, env);
-	return { data: result, code: result.code === 200 ? 200 : (result.code || 500) };
+	if (result.code !== 200) {
+		return { data: result, code: result.code || 500 };
+	}
+
+	// Extract the temp download URL
+	const tempUrl = result.data?.url || result.url;
+	if (!tempUrl) {
+		return { data: result, code: 200 };
+	}
+
+	// Archive to R2 in the background — return the permanent URL immediately
+	if (env.MEDIA_STORAGE) {
+		try {
+			const mediaRes = await fetch(tempUrl);
+			if (mediaRes.ok) {
+				const contentType = mediaRes.headers.get('content-type') || 'application/octet-stream';
+				const body = await mediaRes.arrayBuffer();
+				await env.MEDIA_STORAGE.put(`generations/${taskId}`, body, {
+					httpMetadata: { contentType },
+					customMetadata: { taskId, archivedAt: new Date().toISOString() },
+				});
+				// Return permanent R2 URL
+				const permanentUrl = `https://api.eternium.ai/media/generations/${taskId}`;
+				return { data: { code: 200, data: { url: permanentUrl } }, code: 200 };
+			}
+		} catch (e) {
+			// R2 upload failed — fall back to temp URL (non-fatal)
+			console.error(`[r2] Archive failed for ${taskId}:`, e.message);
+		}
+	}
+
+	// Fallback: return temp URL if R2 unavailable
+	return { data: result, code: 200 };
 }
 
 async function handleUsage(env, keyData) {
@@ -934,6 +978,17 @@ export default {
 				pipelines: Object.keys(PIPELINES).length,
 				content_api: !!env.SUPABASE_URL,
 			}, 200, cors);
+		}
+
+		// ── Media serve (R2 permanent storage) ──────────────────────
+		const mediaMatch = url.pathname.match(/^\/media\/generations\/([a-f0-9]+)$/);
+		if (mediaMatch && request.method === 'GET' && env.MEDIA_STORAGE) {
+			const obj = await env.MEDIA_STORAGE.get(`generations/${mediaMatch[1]}`);
+			if (!obj) return new Response('Not found', { status: 404, headers: cors });
+			const resHeaders = new Headers(cors);
+			resHeaders.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream');
+			resHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
+			return new Response(obj.body, { status: 200, headers: resHeaders });
 		}
 
 		if (url.pathname === '/v1/models' && request.method === 'GET') {
