@@ -747,12 +747,20 @@ function buildKieBody(model, prompt, params) {
 				aspect_ratio: params.aspect_ratio || modelConfig.defaults.aspect_ratio || '16:9',
 				mode: params.mode || modelConfig.defaults.mode || 'std',
 				sound: params.sound ?? modelConfig.defaults.sound ?? false,
+				// KIE requires multi_shots to be explicitly set for Kling 3.0.
+				// false = standard image-to-video (image_urls as start/end frames).
+				multi_shots: false,
 			},
 		};
 		if (params.resolution) kieBody.input.resolution = params.resolution;
-		if (model === 'kling-3.0-mc' || (model === 'kling-3.0' && params.multi_shots)) {
+		// Multi-shot mode: upgrade to true only when caller provides valid multi_prompt.
+		const multiPrompts = Array.isArray(params.multi_prompt) && params.multi_prompt.length > 0
+			? params.multi_prompt
+			: null;
+		if (model === 'kling-3.0-mc' || (model === 'kling-3.0' && params.multi_shots && multiPrompts)) {
 			kieBody.input.multi_shots = true;
-			kieBody.input.multi_prompt = params.multi_prompt || [];
+			kieBody.input.multi_prompt = multiPrompts;
+			kieBody.input.sound = true;
 			if (params.kling_elements) kieBody.input.kling_elements = params.kling_elements;
 		}
 		return kieBody;
@@ -886,6 +894,8 @@ async function handleUsage(env, keyData) {
 	const tierConfig = TIERS[keyData.tier] || TIERS.free;
 	return {
 		data: {
+			email: keyData.email,
+			name: keyData.name,
 			tier: keyData.tier,
 			tier_name: tierConfig.name,
 			credit_value: CREDIT_VALUE,
