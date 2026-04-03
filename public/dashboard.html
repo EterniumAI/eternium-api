@@ -37,6 +37,16 @@
   .btn-sm:hover { border-color: var(--text); color: var(--text); }
   .btn-danger:hover { border-color: var(--red); color: var(--red); }
 
+  /* Account info */
+  .account-info { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .account-avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, var(--emerald), var(--accent)); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1rem; color: #000; flex-shrink: 0; }
+  .account-details { flex: 1; min-width: 0; }
+  .account-name { font-weight: 700; font-size: 0.95rem; }
+  .account-email { font-size: 0.8rem; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+  .account-meta { margin-left: auto; text-align: right; }
+  .account-meta .label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; }
+  .account-meta .val { font-size: 0.8rem; font-family: 'JetBrains Mono', monospace; color: var(--text); }
+
   /* Stats grid */
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
   @media (max-width: 700px) { .stats { grid-template-columns: repeat(2, 1fr); } }
@@ -139,6 +149,19 @@
         <button class="btn-sm btn-danger" onclick="logout()">Disconnect</button>
       </div>
     </header>
+
+    <!-- Account Info -->
+    <div class="account-info" id="account-info" style="display: none;">
+      <div class="account-avatar" id="account-avatar"></div>
+      <div class="account-details">
+        <div class="account-name" id="account-name"></div>
+        <div class="account-email" id="account-email"></div>
+      </div>
+      <div class="account-meta">
+        <div class="label">Account ID</div>
+        <div class="val" id="account-id"></div>
+      </div>
+    </div>
 
     <!-- Stats -->
     <div class="stats">
@@ -296,7 +319,7 @@ for r in pack["results"]:
 <script>
 const BASE = window.location.origin;
 const TIERS = {
-  free:       { credits: '400',     rate: '10',  concurrent: '2' },
+  free:       { credits: '100',     rate: '10',  concurrent: '2' },
   starter:    { credits: '4,400',   rate: '30',  concurrent: '5' },
   builder:    { credits: '12,400',  rate: '45',  concurrent: '10' },
   scale:      { credits: '33,000',  rate: '60',  concurrent: '20' },
@@ -362,6 +385,15 @@ function showDashboard(data) {
 
   const masked = maskKey(currentKey);
   document.getElementById('key-name').textContent = masked;
+
+  // Account info
+  const acctName = data.name || data.email?.split('@')[0] || 'User';
+  const acctEmail = data.email || '';
+  document.getElementById('account-info').style.display = 'flex';
+  document.getElementById('account-avatar').textContent = acctName.charAt(0).toUpperCase();
+  document.getElementById('account-name').textContent = acctName;
+  document.getElementById('account-email').textContent = acctEmail;
+  document.getElementById('account-id').textContent = masked;
 
   // Tier badge
   const tier = (data.tier || 'free').toLowerCase();

@@ -121,7 +121,7 @@ function getChatCost(model, inputTokens = 0, outputTokens = 0, keyTier = null) {
 
 // ── Tier definitions (credits, not dollars) ─────────────────────
 const TIERS = {
-	free:       { name: 'Free',       monthlyCredits: 400,       rateLimit: 10,  concurrentTasks: 2  },
+	free:       { name: 'Free',       monthlyCredits: 100,       rateLimit: 10,  concurrentTasks: 2  },
 	starter:    { name: 'Starter',    monthlyCredits: 4400,      rateLimit: 30,  concurrentTasks: 5  },
 	builder:    { name: 'Builder',    monthlyCredits: 12400,     rateLimit: 45,  concurrentTasks: 10 },
 	scale:      { name: 'Scale',      monthlyCredits: 33000,     rateLimit: 60,  concurrentTasks: 20 },
