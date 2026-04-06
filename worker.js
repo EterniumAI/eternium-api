@@ -443,9 +443,9 @@ const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 
 // OpenRouter model mapping (our slug -> OpenRouter model ID)
 const OPENROUTER_MODELS = {
-	'gpt-5.1':            'openai/gpt-4.1',           // closest available
-	'gpt-5.1-codex-mini': 'openai/gpt-4.1-mini',
-	'gpt-5.4':            'openai/gpt-4.1',           // closest available
+	'gpt-5.1':            'openai/gpt-5.1',
+	'gpt-5.1-codex-mini': 'openai/gpt-5.4-mini',
+	'gpt-5.4':            'openai/gpt-5.4',
 };
 
 async function openaiProxy(path, request, env, keyData) {
@@ -475,13 +475,15 @@ async function openaiProxy(path, request, env, keyData) {
 	return upstreamRes;
 }
 
-// Fallback to OpenRouter when OpenAI fails (5xx / network error)
+// Fallback to OpenRouter when OpenAI fails (5xx / 429 / network error)
 async function openrouterFallback(path, body, env) {
 	if (!env.OPENROUTER_API_KEY) return null;
 
-	// Remap model for OpenRouter compatibility
+	// Remap model and params for OpenRouter compatibility
 	const orModel = OPENROUTER_MODELS[body.model] || body.model;
 	const orBody = { ...body, model: orModel };
+	// OpenRouter requires max_tokens >= 16 for some providers
+	if (orBody.max_tokens && orBody.max_tokens < 16) orBody.max_tokens = 16;
 
 	try {
 		const res = await fetch(`${OPENROUTER_BASE}${path}`, {
@@ -495,7 +497,12 @@ async function openrouterFallback(path, body, env) {
 			body: JSON.stringify(orBody),
 		});
 		if (res.ok) return res;
-	} catch { /* OpenRouter also failed */ }
+		// If OpenRouter also fails, log the error for debugging
+		const errText = await res.text().catch(() => 'unknown');
+		console.error(`OpenRouter fallback failed (${res.status}): ${errText.slice(0, 200)}`);
+	} catch (e) {
+		console.error(`OpenRouter fallback error: ${e.message || e}`);
+	}
 	return null;
 }
 
@@ -544,8 +551,8 @@ async function handleChatCompletions(request, env, keyData) {
 		upstreamRes = null;
 	}
 
-	// Fallback to OpenRouter on server error or network failure
-	if (!upstreamRes || upstreamRes.status >= 500) {
+	// Fallback to OpenRouter on server error, quota exhaustion, or network failure
+	if (!upstreamRes || upstreamRes.status >= 500 || upstreamRes.status === 429) {
 		const fallback = await openrouterFallback('/chat/completions', body, env);
 		if (fallback) upstreamRes = fallback;
 	}
@@ -645,7 +652,7 @@ async function handleEmbeddings(request, env, keyData) {
 		});
 	} catch { upstreamRes = null; }
 
-	if (!upstreamRes || upstreamRes.status >= 500) {
+	if (!upstreamRes || upstreamRes.status >= 500 || upstreamRes.status === 429) {
 		const fallback = await openrouterFallback('/embeddings', body, env);
 		if (fallback) upstreamRes = fallback;
 	}
@@ -704,7 +711,7 @@ function buildKieBody(model, prompt, params) {
 
 	// ── Kie.ai model slug mapping ──
 	const KIE_SLUGS = {
-		'nano-banana-2':   'nano-banana-2/generate',
+		'nano-banana-2':   'nano-banana-2',
 		'nano-banana-pro': 'nano-banana-pro',
 		'gpt-5.4-image':   'gpt-5.4/generate',
 		'flux-kontext':    'flux-kontext/generate',
