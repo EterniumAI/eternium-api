@@ -24,6 +24,11 @@ import {
 	handleAdminOverview, handleAdminRevoke, handleAdminActivate,
 } from './auth.js';
 
+import {
+	resolveTenant, validateTenantStatus, handleGetTenant,
+	handleProvisionTenant, handleListTenants, handleUpdateTenant,
+} from './tenant.js';
+
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
 const CREDIT_VALUE = 0.005; // 1 credit = $0.005 (200 credits per dollar)
@@ -39,6 +44,8 @@ const INTERNAL_ORIGINS = new Set([
 	'https://api.eternium.ai',
 	'https://helix.eternium.ai',
 ]);
+// Managed hosting tenant domains also treated as internal for CORS
+const TENANT_DOMAIN_SUFFIX = '.eternium.cloud';
 
 // ── Kie.ai base costs (USD) ────────────────────────────────────
 // Image models: flat per-image cost
@@ -972,6 +979,26 @@ export default {
 			return new Response(null, { status: 204, headers: cors });
 		}
 
+		// ── Tenant resolution ────────────────────────────────────────
+		// Resolves tenant context from hostname (*.eternium.cloud or custom domain).
+		// Returns null for non-tenant requests (api.eternium.ai, eternium.ai).
+		const tenant = await resolveTenant(request, env);
+
+		// Tenant-specific routes (only when accessed via tenant subdomain)
+		if (tenant) {
+			// Validate tenant is in a servable state
+			const tenantCheck = validateTenantStatus(tenant);
+			if (!tenantCheck.ok && url.pathname !== '/v1/tenant') {
+				return json({ error: tenantCheck.error }, tenantCheck.status, cors);
+			}
+
+			// GET /v1/tenant -- SPA boot endpoint (returns branding + config)
+			if (url.pathname === '/v1/tenant' && request.method === 'GET') {
+				const result = handleGetTenant(tenant, cors);
+				return json(result.data, result.code, cors);
+			}
+		}
+
 		// ── Public routes ────────────────────────────────────────────
 
 		if (url.pathname === '/health') {
@@ -1131,6 +1158,23 @@ export default {
 			if (url.pathname === '/admin/overview' && request.method === 'GET') {
 				const result = await handleAdminOverview(env);
 				return json(result.data, result.code, cors);
+			}
+
+			// ── Tenant management routes ─────────────────────────────
+			if (url.pathname === '/admin/tenants' && request.method === 'GET') {
+				const result = await handleListTenants(env);
+				return json(result.data || { error: result.error }, result.code, cors);
+			}
+
+			if (url.pathname === '/admin/tenants/provision' && request.method === 'POST') {
+				const result = await handleProvisionTenant(request, env);
+				return json(result.data || { error: result.error }, result.code, cors);
+			}
+
+			const tenantUpdateMatch = url.pathname.match(/^\/admin\/tenants\/([a-f0-9-]+)$/);
+			if (tenantUpdateMatch && request.method === 'PATCH') {
+				const result = await handleUpdateTenant(tenantUpdateMatch[1], request, env);
+				return json(result.data || { error: result.error }, result.code, cors);
 			}
 
 			const revokeMatch = url.pathname.match(/^\/admin\/users\/(.+)\/revoke$/);

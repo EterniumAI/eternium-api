@@ -35,6 +35,10 @@ id = "4495ba1e13004534b0e40dd4ad9a35fd"
 binding = "CACHE"
 id = "ca36ec423ccc4eb2b3d67ef1a3d202d5"
 
+[[kv_namespaces]]
+binding = "TENANTS"
+id = "ab6f773b16a3438a961f0ed05917777c"
+
 # ── Supabase (Content API) ──────────────────────────────────────
 # Required for /v1/content/* endpoints (blog, products, datasets)
 # Set via CLI:
@@ -54,6 +58,16 @@ bucket_name = "eternium-media"
 #                        Needs: Contents (read) + Administration (write) on
 #                        EterniumAI/armory-content-system-pro
 #                        Set: wrangler secret put GITHUB_PAT
+
+# ── Managed Hosting (*.eternium.cloud) ──────────────────────────
+# Before deploying, add the wildcard custom domain:
+#   1. Add eternium.cloud zone to Cloudflare (or use existing zone)
+#   2. In Workers & Pages > eternium-api > Settings > Domains & Routes
+#      Add route: *.eternium.cloud/* -> eternium-api worker
+#   Or uncomment the route below after configuring the zone:
+# [[routes]]
+# pattern = "*.eternium.cloud/*"
+# zone_name = "eternium.cloud"
 
 [assets]
 directory = "./public"
