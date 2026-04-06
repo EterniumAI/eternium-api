@@ -50,6 +50,10 @@ bucket_name = "eternium-media"
 # KIE_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, JWT_SECRET
 # OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
 # OPENROUTER_API_KEY  (optional — fallback for chat/embeddings if OpenAI is down)
+# GITHUB_PAT           — Fine-grained PAT for Armory product repo invitations
+#                        Needs: Contents (read) + Administration (write) on
+#                        EterniumAI/armory-content-system-pro
+#                        Set: wrangler secret put GITHUB_PAT
 
 [assets]
 directory = "./public"

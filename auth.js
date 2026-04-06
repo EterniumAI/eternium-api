@@ -22,6 +22,21 @@ const STRIPE_PRICES = {
 	scale: 'price_1TDYXVIyAjP5WeLpWo6KL0oE',      // $199/mo
 };
 
+// ── One-time product purchases (Armory products) ───────────────
+// Stripe product → GitHub repo mapping. When a checkout completes
+// for one of these products, the customer's GitHub username (from
+// checkout metadata) gets invited as a collaborator on the repo.
+const ARMORY_PRODUCTS = {
+	'prod_UHejbvU2MKbD2b': {
+		name: 'Content System Pro',
+		repo: 'EterniumAI/armory-content-system-pro',
+		prices: {
+			founding: 'price_1TJ5PnIyAjP5WeLps63x8sh6',  // $297 Founding 20
+			standard: 'price_1TJ5PnIyAjP5WeLp9xtyyeGp',  // $497 Standard
+		},
+	},
+};
+
 const MRR_VALUES = { free: 0, starter: 29, builder: 79, scale: 199, enterprise: 0, partner: 0, internal: 0 };
 
 // ── Crypto helpers ──────────────────────────────────────────────
@@ -311,15 +326,34 @@ export async function handleProvisionKey(request, env) {
 }
 
 export async function handleRegenerateKey(request, env) {
+	let user = null;
+
+	// Support API key auth (X-API-Key header or Bearer token that matches a key)
+	const apiKey = request.headers.get('X-API-Key');
 	const authHeader = request.headers.get('Authorization') || '';
-	const token = authHeader.replace('Bearer ', '');
-	if (!env.JWT_SECRET) return { error: 'Server misconfigured', code: 500 };
+	const bearerToken = authHeader.replace('Bearer ', '');
 
-	const payload = await verifyJWT(token, env.JWT_SECRET);
-	if (!payload) return { error: 'Not authenticated', code: 401 };
+	if (apiKey || bearerToken) {
+		const keyToCheck = apiKey || bearerToken;
+		// Try API key lookup first
+		if (env.API_KEYS) {
+			try {
+				const keyData = await env.API_KEYS.get(`key:${keyToCheck}`, 'json');
+				if (keyData && keyData.email) {
+					user = await getUser(env, keyData.email);
+				}
+			} catch { /* fall through to JWT */ }
+		}
+		// Fall back to JWT auth if API key lookup didn't find a user
+		if (!user && env.JWT_SECRET) {
+			const payload = await verifyJWT(bearerToken, env.JWT_SECRET);
+			if (payload) {
+				user = await getUser(env, payload.sub);
+			}
+		}
+	}
 
-	const user = await getUser(env, payload.sub);
-	if (!user) return { error: 'User not found', code: 404 };
+	if (!user) return { error: 'Not authenticated', code: 401 };
 	if (!user.apiKey) return { error: 'No API key to regenerate. Use POST /auth/provision-key first.', code: 404 };
 
 	// Revoke old key from API_KEYS KV
@@ -377,6 +411,27 @@ export async function handleStripeSuccess(request, env) {
 	return { data: { api_key: apiKey, tier, email }, code: 200 };
 }
 
+// ── GitHub repo invite for Armory product purchases ────────────
+async function inviteToGitHubRepo(env, repo, githubUsername) {
+	if (!env.GITHUB_PAT || !githubUsername) return { ok: false, error: 'Missing PAT or username' };
+	const [owner, repoName] = repo.split('/');
+	const url = `https://api.github.com/repos/${owner}/${repoName}/collaborators/${githubUsername}`;
+	const res = await fetch(url, {
+		method: 'PUT',
+		headers: {
+			Authorization: `Bearer ${env.GITHUB_PAT}`,
+			Accept: 'application/vnd.github+json',
+			'X-GitHub-Api-Version': '2022-11-28',
+			'User-Agent': 'Eternium-API-Worker',
+		},
+		body: JSON.stringify({ permission: 'pull' }),
+	});
+	if (res.status === 201) return { ok: true, status: 'invited' };
+	if (res.status === 204) return { ok: true, status: 'already-collaborator' };
+	const body = await res.text();
+	return { ok: false, status: res.status, error: body };
+}
+
 export async function handleStripeWebhook(request, env) {
 	const body = await request.text();
 	const sig = request.headers.get('stripe-signature');
@@ -392,6 +447,23 @@ export async function handleStripeWebhook(request, env) {
 	switch (event.type) {
 		case 'checkout.session.completed': {
 			const session = event.data.object;
+
+			// ── Armory product purchases (one-time, GitHub repo invite) ──
+			const productId = session.metadata?.product_id;
+			const armoryProduct = productId ? ARMORY_PRODUCTS[productId] : null;
+			if (armoryProduct) {
+				const githubUsername = session.metadata?.github_username;
+				const customerEmail = session.customer_email || session.customer_details?.email || session.metadata?.email;
+				if (githubUsername) {
+					const result = await inviteToGitHubRepo(env, armoryProduct.repo, githubUsername);
+					console.log(`[Armory] ${armoryProduct.name}: invited ${githubUsername} → ${result.status || result.error}`);
+				} else {
+					console.log(`[Armory] ${armoryProduct.name}: no github_username in metadata, email=${customerEmail}. Manual invite needed.`);
+				}
+				break;
+			}
+
+			// ── API subscription provisioning (existing flow) ──
 			const email = session.metadata?.email;
 			const tier = session.metadata?.tier;
 			if (email && tier) {
