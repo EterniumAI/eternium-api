@@ -59,15 +59,13 @@ bucket_name = "eternium-media"
 #                        EterniumAI/armory-content-system-pro
 #                        Set: wrangler secret put GITHUB_PAT
 
-# ── Managed Hosting (*.eternium.cloud) ──────────────────────────
-# Before deploying, add the wildcard custom domain:
-#   1. Add eternium.cloud zone to Cloudflare (or use existing zone)
-#   2. In Workers & Pages > eternium-api > Settings > Domains & Routes
-#      Add route: *.eternium.cloud/* -> eternium-api worker
-#   Or uncomment the route below after configuring the zone:
-# [[routes]]
-# pattern = "*.eternium.cloud/*"
-# zone_name = "eternium.cloud"
+# ── Managed Hosting (*.app.eternium.ai tenant subdomains) ───────
+# Wildcard route scoped to app.eternium.ai to avoid conflicts with
+# existing proxied subdomains (helix, dash, lamarnie, etc.).
+# Requires wildcard DNS: *.app.eternium.ai -> Worker
+[[routes]]
+pattern = "*.app.eternium.ai/*"
+zone_name = "eternium.ai"
 
 [assets]
 directory = "./public"

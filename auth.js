@@ -14,6 +14,8 @@
  *   USAGE          — Per-key usage data
  */
 
+import { handleProvisionTenant, handleUpdateTenant } from './tenant.js';
+
 // ── Tier → Stripe Price ID mapping ──────────────────────────────
 // Create these products/prices in Stripe Dashboard, then paste IDs here.
 const STRIPE_PRICES = {
@@ -36,6 +38,17 @@ const ARMORY_PRODUCTS = {
 		},
 	},
 };
+
+// ── Managed Hosting tier → Stripe Price ID mapping ────────────
+// Create these in Stripe Dashboard, then paste IDs here.
+const HOSTING_PRICES = {
+	starter: 'price_1TJNw0IyAjP5WeLp7vxHkE2e',     // $29/mo
+	pro: 'price_1TJNwjIyAjP5WeLpMI25csJ0',          // $79/mo
+	enterprise: 'price_1TJO02IyAjP5WeLpvDLUVsWs',   // $299/mo
+};
+
+const VALID_HOSTING_TIERS = new Set(['starter', 'pro', 'enterprise']);
+const TENANT_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
 
 const MRR_VALUES = { free: 0, starter: 29, builder: 79, scale: 199, enterprise: 0, partner: 0, internal: 0 };
 
@@ -463,6 +476,45 @@ export async function handleStripeWebhook(request, env) {
 				break;
 			}
 
+			// ── Managed hosting provisioning ──
+			const hostingTier = session.metadata?.hosting_tier;
+			if (hostingTier) {
+				if (!VALID_HOSTING_TIERS.has(hostingTier)) {
+					console.log(`[Hosting] Invalid tier "${hostingTier}" in checkout metadata`);
+					break;
+				}
+				const slug = session.metadata?.slug;
+				const ownerEmail = session.customer_email || session.customer_details?.email || session.metadata?.email;
+				const productSlug = session.metadata?.product_slug || 'imageforge';
+
+				if (!slug || !TENANT_SLUG_RE.test(slug)) {
+					console.log(`[Hosting] Invalid or missing slug "${slug}" in checkout metadata`);
+					break;
+				}
+				if (!ownerEmail) {
+					console.log(`[Hosting] No owner email in checkout for slug "${slug}"`);
+					break;
+				}
+
+				const provisionBody = {
+					slug,
+					name: session.metadata?.company_name || slug,
+					owner_email: ownerEmail,
+					product_slug: productSlug,
+					plan: hostingTier,
+					stripe_customer_id: session.customer,
+					stripe_subscription_id: session.subscription,
+				};
+				const fakeRequest = new Request('https://internal/provision', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(provisionBody),
+				});
+				const result = await handleProvisionTenant(fakeRequest, env);
+				console.log(`[Hosting] Provisioned ${slug}: ${result.data ? 'OK' : result.error}`);
+				break;
+			}
+
 			// ── API subscription provisioning (existing flow) ──
 			const email = session.metadata?.email;
 			const tier = session.metadata?.tier;
@@ -481,16 +533,29 @@ export async function handleStripeWebhook(request, env) {
 			break;
 		}
 		case 'customer.subscription.updated': {
-			// Handle tier changes
 			const sub = event.data.object;
 			const priceId = sub.items?.data?.[0]?.price?.id;
+
+			// ── Hosting plan change ──
+			const newHostingTier = Object.entries(HOSTING_PRICES).find(([, id]) => id === priceId)?.[0];
+			if (newHostingTier && sub.metadata?.tenant_id) {
+				const fakeReq = new Request(`https://internal/admin/tenants/${sub.metadata.tenant_id}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ plan: newHostingTier }),
+				});
+				const result = await handleUpdateTenant(sub.metadata.tenant_id, fakeReq, env);
+				console.log(`[Hosting] Plan updated ${sub.metadata.tenant_id} -> ${newHostingTier}: ${result.data ? 'OK' : result.error}`);
+				break;
+			}
+
+			// ── API tier change ──
 			const newTier = Object.entries(STRIPE_PRICES).find(([, id]) => id === priceId)?.[0];
 			if (newTier && sub.metadata?.email) {
 				const user = await getUser(env, sub.metadata.email);
 				if (user) {
 					user.tier = newTier;
 					await saveUser(env, user);
-					// Update API_KEYS KV too
 					if (user.apiKey && env.API_KEYS) {
 						const keyData = await env.API_KEYS.get(`key:${user.apiKey}`, 'json');
 						if (keyData) {
@@ -504,8 +569,21 @@ export async function handleStripeWebhook(request, env) {
 			break;
 		}
 		case 'customer.subscription.deleted': {
-			// Downgrade to free
 			const sub = event.data.object;
+
+			// ── Hosting cancellation ──
+			if (sub.metadata?.tenant_id) {
+				const fakeReq = new Request(`https://internal/admin/tenants/${sub.metadata.tenant_id}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ status: 'cancelled' }),
+				});
+				const result = await handleUpdateTenant(sub.metadata.tenant_id, fakeReq, env);
+				console.log(`[Hosting] Cancelled ${sub.metadata.tenant_id}: ${result.data ? 'OK' : result.error}`);
+				break;
+			}
+
+			// ── API subscription downgrade to free ──
 			if (sub.metadata?.email) {
 				const user = await getUser(env, sub.metadata.email);
 				if (user) {
@@ -519,6 +597,33 @@ export async function handleStripeWebhook(request, env) {
 							await env.API_KEYS.put(`key:${user.apiKey}`, JSON.stringify(keyData));
 						}
 					}
+				}
+			}
+			break;
+		}
+		case 'invoice.payment_failed': {
+			// ── Suspend hosting tenant on payment failure ──
+			const invoice = event.data.object;
+			const subId = invoice.subscription;
+			if (subId && env.TENANTS && env.SUPABASE_URL) {
+				// Look up tenant by stripe_subscription_id
+				try {
+					const res = await fetch(
+						`${env.SUPABASE_URL}/rest/v1/tenants?stripe_subscription_id=eq.${subId}&select=id&limit=1`,
+						{ headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+					);
+					const tenants = await res.json();
+					if (tenants?.[0]?.id) {
+						const fakeReq = new Request(`https://internal/admin/tenants/${tenants[0].id}`, {
+							method: 'PATCH',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ status: 'suspended' }),
+						});
+						const result = await handleUpdateTenant(tenants[0].id, fakeReq, env);
+						console.log(`[Hosting] Suspended ${tenants[0].id} (payment failed): ${result.data ? 'OK' : result.error}`);
+					}
+				} catch (err) {
+					console.log(`[Hosting] Failed to suspend tenant for sub ${subId}: ${err.message}`);
 				}
 			}
 			break;

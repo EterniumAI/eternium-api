@@ -29,6 +29,10 @@ import {
 	handleProvisionTenant, handleListTenants, handleUpdateTenant,
 } from './tenant.js';
 
+import {
+	handleMediaUpload, handleMediaServe, handleMediaDelete,
+} from './media.js';
+
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
 const CREDIT_VALUE = 0.005; // 1 credit = $0.005 (200 credits per dollar)
@@ -45,7 +49,7 @@ const INTERNAL_ORIGINS = new Set([
 	'https://helix.eternium.ai',
 ]);
 // Managed hosting tenant domains also treated as internal for CORS
-const TENANT_DOMAIN_SUFFIX = '.eternium.cloud';
+const TENANT_DOMAIN_SUFFIX = '.app.eternium.ai';
 
 // ── Kie.ai base costs (USD) ────────────────────────────────────
 // Image models: flat per-image cost
@@ -411,7 +415,7 @@ function checkRateLimit(apiKey, limit = 30) {
 // ── CORS ────────────────────────────────────────────────────────
 function corsHeaders(origin) {
 	const headers = {
-		'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, DELETE',
+		'Access-Control-Allow-Methods': 'POST, GET, PUT, OPTIONS, DELETE',
 		'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key',
 		'Access-Control-Max-Age': '86400',
 		// Vary: Origin ensures CDN/browser caches don't mix responses across origins
@@ -980,7 +984,7 @@ export default {
 		}
 
 		// ── Tenant resolution ────────────────────────────────────────
-		// Resolves tenant context from hostname (*.eternium.cloud or custom domain).
+		// Resolves tenant context from hostname (*.app.eternium.ai or custom domain).
 		// Returns null for non-tenant requests (api.eternium.ai, eternium.ai).
 		const tenant = await resolveTenant(request, env);
 
@@ -1023,6 +1027,16 @@ export default {
 			resHeaders.set('Content-Type', obj.httpMetadata?.contentType || 'application/octet-stream');
 			resHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
 			return new Response(obj.body, { status: 200, headers: resHeaders });
+		}
+
+		// ── Media serve (R2 general storage) ────────────────────────
+		if (url.pathname.startsWith('/v1/media/') && request.method === 'GET') {
+			const key = decodeURIComponent(url.pathname.slice('/v1/media/'.length));
+			if (!key) return json({ error: 'Media key required' }, 400, cors);
+			const res = await handleMediaServe(key, env);
+			// Merge CORS headers into the streaming response
+			for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+			return res;
 		}
 
 		if (url.pathname === '/v1/models' && request.method === 'GET') {
@@ -1243,6 +1257,19 @@ export default {
 			const resHeaders = new Headers(result.response.headers);
 			for (const [k, v] of Object.entries(headers)) resHeaders.set(k, v);
 			return new Response(result.response.body, { status: result.response.status, headers: resHeaders });
+		}
+
+		// ── Media upload / delete (R2) ──────────────────────────────
+		if (url.pathname === '/v1/media/upload' && request.method === 'PUT') {
+			const result = await handleMediaUpload(request, env, keyData);
+			return json(result.data || { error: result.error }, result.code, headers);
+		}
+
+		if (url.pathname.startsWith('/v1/media/') && request.method === 'DELETE') {
+			const key = decodeURIComponent(url.pathname.slice('/v1/media/'.length));
+			if (!key) return json({ error: 'Media key required' }, 400, headers);
+			const result = await handleMediaDelete(key, env, keyData);
+			return json(result.data || { error: result.error }, result.code, headers);
 		}
 
 		// ── Kie.ai generation routes ────────────────────────────────

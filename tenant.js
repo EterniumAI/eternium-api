@@ -4,13 +4,13 @@
  *
  * Tenant resolution flow:
  *   1. Parse hostname from request
- *   2. If *.eternium.cloud, extract slug and lookup in TENANTS KV
+ *   2. If *.app.eternium.ai, extract slug and lookup in TENANTS KV
  *   3. If custom domain, lookup domain in TENANTS KV
  *   4. If api.eternium.ai or eternium.ai, no tenant (null context)
  *   5. Attach tenant context to request for downstream use
  */
 
-const MANAGED_DOMAIN = 'eternium.cloud';
+const MANAGED_DOMAIN = 'app.eternium.ai';
 
 /**
  * Resolve tenant from request hostname.
@@ -19,7 +19,7 @@ const MANAGED_DOMAIN = 'eternium.cloud';
 export async function resolveTenant(request, env) {
 	const host = (request.headers.get('Host') || '').toLowerCase().replace(/:\d+$/, '');
 
-	// Check if this is a tenant subdomain: {slug}.eternium.cloud
+	// Check if this is a tenant subdomain: {slug}.app.eternium.ai
 	if (host.endsWith(`.${MANAGED_DOMAIN}`)) {
 		const slug = host.replace(`.${MANAGED_DOMAIN}`, '');
 		if (!slug || slug.includes('.')) return null; // invalid or nested subdomain
@@ -27,12 +27,15 @@ export async function resolveTenant(request, env) {
 		return lookupTenantBySlug(slug, env);
 	}
 
+	// Skip internal/reserved hosts
+	if (isInternalHost(host)) return null;
+
 	// Check if this is a custom domain
-	if (!isInternalHost(host) && env.TENANTS) {
+	if (env.TENANTS) {
 		return lookupTenantByDomain(host, env);
 	}
 
-	return null; // Not a tenant request (eternium.ai, api.eternium.ai, etc.)
+	return null;
 }
 
 /**
@@ -68,10 +71,16 @@ async function lookupTenantByDomain(domain, env) {
 /**
  * Check if host is an internal Eternium domain (not a tenant).
  */
+const RESERVED_SUBDOMAINS = new Set([
+	'eternium.ai', 'www.eternium.ai',
+	'api.eternium.ai', 'helix.eternium.ai',
+	'media.eternium.ai', 'docs.eternium.ai',
+	'admin.eternium.ai', 'mail.eternium.ai',
+	'staging.eternium.ai',
+]);
+
 function isInternalHost(host) {
-	return host === 'eternium.ai'
-		|| host === 'api.eternium.ai'
-		|| host === 'helix.eternium.ai'
+	return RESERVED_SUBDOMAINS.has(host)
 		|| host === 'localhost'
 		|| host.startsWith('localhost:')
 		|| host.startsWith('127.0.0.1');
