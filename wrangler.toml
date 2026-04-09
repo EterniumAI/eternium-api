@@ -9,6 +9,7 @@ compatibility_date = "2024-12-01"
 
 [vars]
 ADMIN_EMAIL = "ty@eternium.ai"
+SUPABASE_PROJECT_REF = "wmahfjguvqvefgjpbcdc"
 
 # ── KV Namespaces ────────────────────────────────────────────────
 # Create ALL of these before first deploy:

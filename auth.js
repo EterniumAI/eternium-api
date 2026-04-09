@@ -7,6 +7,8 @@
  *   STRIPE_WEBHOOK_SECRET  — Stripe webhook signing secret (whsec_...)
  *   ADMIN_EMAIL            — Admin email (ty@eternium.ai)
  *   JWT_SECRET             — Token signing secret
+ *   SUPABASE_JWT_SECRET    — Supabase JWT signing secret (HS256, dual auth)
+ *   SUPABASE_PROJECT_REF   — Supabase project ref for issuer validation (env var in wrangler.toml)
  *
  * KV Namespaces:
  *   USERS          — User records by email  { email, passwordHash, name, tier, apiKey, stripeCustomerId, createdAt, active }
@@ -109,7 +111,7 @@ async function verifyJWT(token, secret) {
 		const valid = await crypto.subtle.verify('HMAC', key, sigBytes, new TextEncoder().encode(`${header}.${body}`));
 		if (!valid) return null;
 		const payload = JSON.parse(atob(body));
-		if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+		if (payload.exp !== undefined && payload.exp !== null && payload.exp < Math.floor(Date.now() / 1000)) return null;
 		return payload;
 	} catch { return null; }
 }
@@ -119,7 +121,7 @@ function base64UrlDecode(str) {
 	return atob(str.replace(/-/g, '+').replace(/_/g, '/'));
 }
 
-async function verifySupabaseJWT(token, secret) {
+async function verifySupabaseJWT(token, secret, expectedIssuer) {
 	try {
 		const parts = token.split('.');
 		if (parts.length !== 3) return null;
@@ -134,8 +136,9 @@ async function verifySupabaseJWT(token, secret) {
 		if (!valid) return null;
 
 		const payload = JSON.parse(base64UrlDecode(body));
-		if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+		if (payload.exp !== undefined && payload.exp !== null && payload.exp < Math.floor(Date.now() / 1000)) return null;
 		if (!payload.email) return null;
+		if (expectedIssuer && payload.iss !== expectedIssuer) return null;
 
 		return payload;
 	} catch { return null; }
@@ -154,38 +157,29 @@ export async function resolveJWTAuth(token, env) {
 
 	// Try Supabase JWT (sub = UUID, email = email)
 	if (env.SUPABASE_JWT_SECRET) {
-		const payload = await verifySupabaseJWT(token, env.SUPABASE_JWT_SECRET);
+		const projectRef = env.SUPABASE_PROJECT_REF || 'wmahfjguvqvefgjpbcdc';
+		const issuer = `https://${projectRef}.supabase.co/auth/v1`;
+		const payload = await verifySupabaseJWT(token, env.SUPABASE_JWT_SECRET, issuer);
 		if (payload) return { email: payload.email, source: 'supabase', supabaseUid: payload.sub };
 	}
 
 	return null;
 }
 
-// Resolve a Supabase-authed user to KV API key data. Auto-provisions if user is new.
-export async function resolveSupabaseUser(email, supabaseUid, env) {
+// Ensure a KV user record exists for a Supabase-authed user. Returns the user object.
+export async function ensureSupabaseUser(email, supabaseUid, env) {
 	const lowerEmail = email.toLowerCase();
 	let user = await getUser(env, lowerEmail);
 
 	if (user) {
-		// Link Supabase UID if not already set
 		if (!user.supabaseUid && supabaseUid) {
 			user.supabaseUid = supabaseUid;
 			await saveUser(env, user);
 		}
-
-		if (user.apiKey && env.API_KEYS) {
-			const keyData = await env.API_KEYS.get(`key:${user.apiKey}`, 'json');
-			if (keyData) return keyData;
-		}
-
-		// User exists but no API key — provision one
-		const apiKey = await provisionKey(env, lowerEmail, user.tier || 'free', user.name);
-		user.apiKey = apiKey;
-		await saveUser(env, user);
-		return env.API_KEYS ? await env.API_KEYS.get(`key:${apiKey}`, 'json') : null;
+		return user;
 	}
 
-	// Brand new user — auto-provision with free tier
+	// Write user record first (sentinel) to minimize race window
 	const newUser = {
 		email: lowerEmail,
 		name: lowerEmail.split('@')[0],
@@ -197,10 +191,26 @@ export async function resolveSupabaseUser(email, supabaseUid, env) {
 		createdAt: new Date().toISOString(),
 		active: true,
 	};
-
-	const apiKey = await provisionKey(env, lowerEmail, 'free', newUser.name);
-	newUser.apiKey = apiKey;
 	await saveUser(env, newUser);
+
+	// Re-read to catch concurrent writes (another request may have provisioned first)
+	return await getUser(env, lowerEmail);
+}
+
+// Resolve a Supabase-authed user to KV API key data. Auto-provisions if user is new.
+export async function resolveSupabaseUser(email, supabaseUid, env) {
+	const user = await ensureSupabaseUser(email, supabaseUid, env);
+	if (!user) return null;
+
+	if (user.apiKey && env.API_KEYS) {
+		const keyData = await env.API_KEYS.get(`key:${user.apiKey}`, 'json');
+		if (keyData) return keyData;
+	}
+
+	// Provision API key (use whatever key the user record has after re-read)
+	const apiKey = await provisionKey(env, user.email, user.tier || 'free', user.name);
+	user.apiKey = apiKey;
+	await saveUser(env, user);
 	return env.API_KEYS ? await env.API_KEYS.get(`key:${apiKey}`, 'json') : null;
 }
 
@@ -364,23 +374,9 @@ export async function handleCheckout(request, env) {
 		return { error: `Stripe price not configured for tier: ${tier}. Set STRIPE_PRICES in auth.js.`, code: 500 };
 	}
 
-	let user = await getUser(env, auth.email);
-
-	// Auto-create KV user for Supabase-authed users hitting checkout
-	if (!user && auth.source === 'supabase') {
-		user = {
-			email: auth.email.toLowerCase(),
-			name: auth.email.split('@')[0],
-			passwordHash: null,
-			tier: 'free',
-			apiKey: null,
-			supabaseUid: auth.supabaseUid,
-			stripeCustomerId: null,
-			createdAt: new Date().toISOString(),
-			active: true,
-		};
-		await saveUser(env, user);
-	}
+	let user = auth.source === 'supabase'
+		? await ensureSupabaseUser(auth.email, auth.supabaseUid, env)
+		: await getUser(env, auth.email);
 	if (!user) return { error: 'User not found', code: 404 };
 
 	// Create or get Stripe customer
@@ -422,23 +418,9 @@ export async function handleProvisionKey(request, env) {
 	try { body = await request.json(); }
 	catch { return { error: 'Invalid body', code: 400 }; }
 
-	let user = await getUser(env, auth.email);
-
-	// Auto-create KV user for Supabase-authed users provisioning a key
-	if (!user && auth.source === 'supabase') {
-		user = {
-			email: auth.email.toLowerCase(),
-			name: auth.email.split('@')[0],
-			passwordHash: null,
-			tier: 'free',
-			apiKey: null,
-			supabaseUid: auth.supabaseUid,
-			stripeCustomerId: null,
-			createdAt: new Date().toISOString(),
-			active: true,
-		};
-		await saveUser(env, user);
-	}
+	let user = auth.source === 'supabase'
+		? await ensureSupabaseUser(auth.email, auth.supabaseUid, env)
+		: await getUser(env, auth.email);
 	if (!user) return { error: 'User not found', code: 404 };
 
 	// Don't allow re-provisioning if key exists (they should use regenerate)
@@ -446,7 +428,8 @@ export async function handleProvisionKey(request, env) {
 		return { error: 'API key already exists. Use POST /auth/regenerate-key to rotate it.', code: 409 };
 	}
 
-	const tier = body.tier || user.tier || 'free';
+	const isAdmin = user.email.toLowerCase() === (env.ADMIN_EMAIL || 'ty@eternium.ai').toLowerCase();
+	const tier = isAdmin ? (body.tier || user.tier || 'free') : (user.tier || 'free');
 	const apiKey = await provisionKey(env, user.email, tier, user.name);
 
 	user.apiKey = apiKey;
