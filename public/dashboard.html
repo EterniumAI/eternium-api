@@ -492,7 +492,7 @@ function regenerateKey() {
 
   fetch(`${BASE}/auth/regenerate-key`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentKey}` },
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': currentKey },
   })
     .then(r => {
       if (!r.ok) throw new Error('Failed to regenerate key');

@@ -4,3 +4,6 @@ node_modules/
 .env
 dist/
 *.log
+sdk/python/build/
+sdk/python/*.egg-info/
+.claude/settings.local.json
