@@ -22,6 +22,7 @@ import {
 	handleSignup, handleLogin, handleCheckout, handleProvisionKey, handleRegenerateKey,
 	handleStripeSuccess, handleStripeWebhook,
 	handleAdminOverview, handleAdminRevoke, handleAdminActivate,
+	resolveJWTAuth, resolveSupabaseUser,
 } from './auth.js';
 
 import {
@@ -1295,12 +1296,21 @@ export default {
 			|| (request.headers.get('Authorization') || '').replace('Bearer ', '');
 
 		if (!apiKey) {
-			return json({ error: 'API key required. Pass via X-API-Key header or Authorization: Bearer <key>' }, 401, cors);
+			return json({ error: 'Authentication required. Pass API key via X-API-Key header, or Bearer token.' }, 401, cors);
 		}
 
-		const keyData = await validateApiKey(apiKey, env);
+		let keyData = await validateApiKey(apiKey, env);
+
+		// If not a valid API key, try as Supabase JWT
 		if (!keyData) {
-			return json({ error: 'Invalid API key' }, 403, cors);
+			const auth = await resolveJWTAuth(apiKey, env);
+			if (auth) {
+				keyData = await resolveSupabaseUser(auth.email, auth.supabaseUid, env);
+			}
+		}
+
+		if (!keyData) {
+			return json({ error: 'Invalid API key or token' }, 403, cors);
 		}
 
 		const tierConfig = TIERS[keyData.tier] || TIERS.free;

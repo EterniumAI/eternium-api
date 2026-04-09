@@ -114,6 +114,96 @@ async function verifyJWT(token, secret) {
 	} catch { return null; }
 }
 
+// ── Supabase JWT verification (HS256, base64url) ───────────────
+function base64UrlDecode(str) {
+	return atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+}
+
+async function verifySupabaseJWT(token, secret) {
+	try {
+		const parts = token.split('.');
+		if (parts.length !== 3) return null;
+		const [header, body, sig] = parts;
+
+		const key = await crypto.subtle.importKey(
+			'raw', new TextEncoder().encode(secret),
+			{ name: 'HMAC', hash: 'SHA-256' }, false, ['verify']
+		);
+		const sigBytes = Uint8Array.from(base64UrlDecode(sig), c => c.charCodeAt(0));
+		const valid = await crypto.subtle.verify('HMAC', key, sigBytes, new TextEncoder().encode(`${header}.${body}`));
+		if (!valid) return null;
+
+		const payload = JSON.parse(base64UrlDecode(body));
+		if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+		if (!payload.email) return null;
+
+		return payload;
+	} catch { return null; }
+}
+
+// Resolve JWT auth — tries custom JWT first, then Supabase JWT.
+// Returns { email, source, supabaseUid? } or null.
+export async function resolveJWTAuth(token, env) {
+	if (!token) return null;
+
+	// Try custom JWT first (existing HMAC-SHA256)
+	if (env.JWT_SECRET) {
+		const payload = await verifyJWT(token, env.JWT_SECRET);
+		if (payload) return { email: payload.sub, source: 'custom' };
+	}
+
+	// Try Supabase JWT (sub = UUID, email = email)
+	if (env.SUPABASE_JWT_SECRET) {
+		const payload = await verifySupabaseJWT(token, env.SUPABASE_JWT_SECRET);
+		if (payload) return { email: payload.email, source: 'supabase', supabaseUid: payload.sub };
+	}
+
+	return null;
+}
+
+// Resolve a Supabase-authed user to KV API key data. Auto-provisions if user is new.
+export async function resolveSupabaseUser(email, supabaseUid, env) {
+	const lowerEmail = email.toLowerCase();
+	let user = await getUser(env, lowerEmail);
+
+	if (user) {
+		// Link Supabase UID if not already set
+		if (!user.supabaseUid && supabaseUid) {
+			user.supabaseUid = supabaseUid;
+			await saveUser(env, user);
+		}
+
+		if (user.apiKey && env.API_KEYS) {
+			const keyData = await env.API_KEYS.get(`key:${user.apiKey}`, 'json');
+			if (keyData) return keyData;
+		}
+
+		// User exists but no API key — provision one
+		const apiKey = await provisionKey(env, lowerEmail, user.tier || 'free', user.name);
+		user.apiKey = apiKey;
+		await saveUser(env, user);
+		return env.API_KEYS ? await env.API_KEYS.get(`key:${apiKey}`, 'json') : null;
+	}
+
+	// Brand new user — auto-provision with free tier
+	const newUser = {
+		email: lowerEmail,
+		name: lowerEmail.split('@')[0],
+		passwordHash: null,
+		tier: 'free',
+		apiKey: null,
+		supabaseUid,
+		stripeCustomerId: null,
+		createdAt: new Date().toISOString(),
+		active: true,
+	};
+
+	const apiKey = await provisionKey(env, lowerEmail, 'free', newUser.name);
+	newUser.apiKey = apiKey;
+	await saveUser(env, newUser);
+	return env.API_KEYS ? await env.API_KEYS.get(`key:${apiKey}`, 'json') : null;
+}
+
 // ── Stripe helpers ──────────────────────────────────────────────
 async function stripeRequest(method, path, body, env) {
 	const res = await fetch(`https://api.stripe.com/v1${path}`, {
@@ -261,10 +351,8 @@ export async function handleLogin(request, env) {
 export async function handleCheckout(request, env) {
 	const authHeader = request.headers.get('Authorization') || '';
 	const token = authHeader.replace('Bearer ', '');
-	if (!env.JWT_SECRET) return { error: 'Server misconfigured: JWT_SECRET not set', code: 500 };
-	const secret = env.JWT_SECRET;
-	const payload = await verifyJWT(token, secret);
-	if (!payload) return { error: 'Not authenticated', code: 401 };
+	const auth = await resolveJWTAuth(token, env);
+	if (!auth) return { error: 'Not authenticated', code: 401 };
 
 	let body;
 	try { body = await request.json(); }
@@ -276,7 +364,23 @@ export async function handleCheckout(request, env) {
 		return { error: `Stripe price not configured for tier: ${tier}. Set STRIPE_PRICES in auth.js.`, code: 500 };
 	}
 
-	const user = await getUser(env, payload.sub);
+	let user = await getUser(env, auth.email);
+
+	// Auto-create KV user for Supabase-authed users hitting checkout
+	if (!user && auth.source === 'supabase') {
+		user = {
+			email: auth.email.toLowerCase(),
+			name: auth.email.split('@')[0],
+			passwordHash: null,
+			tier: 'free',
+			apiKey: null,
+			supabaseUid: auth.supabaseUid,
+			stripeCustomerId: null,
+			createdAt: new Date().toISOString(),
+			active: true,
+		};
+		await saveUser(env, user);
+	}
 	if (!user) return { error: 'User not found', code: 404 };
 
 	// Create or get Stripe customer
@@ -311,16 +415,30 @@ export async function handleCheckout(request, env) {
 export async function handleProvisionKey(request, env) {
 	const authHeader = request.headers.get('Authorization') || '';
 	const token = authHeader.replace('Bearer ', '');
-	if (!env.JWT_SECRET) return { error: 'Server misconfigured: JWT_SECRET not set', code: 500 };
-	const secret = env.JWT_SECRET;
-	const payload = await verifyJWT(token, secret);
-	if (!payload) return { error: 'Not authenticated', code: 401 };
+	const auth = await resolveJWTAuth(token, env);
+	if (!auth) return { error: 'Not authenticated', code: 401 };
 
 	let body;
 	try { body = await request.json(); }
 	catch { return { error: 'Invalid body', code: 400 }; }
 
-	const user = await getUser(env, payload.sub);
+	let user = await getUser(env, auth.email);
+
+	// Auto-create KV user for Supabase-authed users provisioning a key
+	if (!user && auth.source === 'supabase') {
+		user = {
+			email: auth.email.toLowerCase(),
+			name: auth.email.split('@')[0],
+			passwordHash: null,
+			tier: 'free',
+			apiKey: null,
+			supabaseUid: auth.supabaseUid,
+			stripeCustomerId: null,
+			createdAt: new Date().toISOString(),
+			active: true,
+		};
+		await saveUser(env, user);
+	}
 	if (!user) return { error: 'User not found', code: 404 };
 
 	// Don't allow re-provisioning if key exists (they should use regenerate)
@@ -357,11 +475,11 @@ export async function handleRegenerateKey(request, env) {
 				}
 			} catch { /* fall through to JWT */ }
 		}
-		// Fall back to JWT auth if API key lookup didn't find a user
-		if (!user && env.JWT_SECRET) {
-			const payload = await verifyJWT(bearerToken, env.JWT_SECRET);
-			if (payload) {
-				user = await getUser(env, payload.sub);
+		// Fall back to JWT auth (custom or Supabase) if API key lookup didn't find a user
+		if (!user) {
+			const auth = await resolveJWTAuth(bearerToken, env);
+			if (auth) {
+				user = await getUser(env, auth.email);
 			}
 		}
 	}
