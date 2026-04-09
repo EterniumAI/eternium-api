@@ -895,6 +895,89 @@ async function handlePipeline(body, env, keyData) {
 	};
 }
 
+// ── Thumbnail concept generator (campaign-aware) ───────────────
+// Accepts structured campaign data, builds 3 prompt variants, fires
+// 3 parallel image generations. Returns task IDs for polling.
+async function handleThumbnailGenerate(body, env, keyData) {
+	const { title, hook, key_takeaways, content_pillar, style, model } = body;
+
+	if (!title) return { error: 'title is required', code: 400 };
+	if (!hook) return { error: 'hook is required', code: 400 };
+
+	const imgModel = model || 'gpt-5.4-image';
+	if (!MODELS[imgModel] || MODELS[imgModel].type !== 'image') {
+		return { error: `Invalid image model: ${imgModel}. Available: ${Object.keys(MODELS).filter(m => MODELS[m].type === 'image').join(', ')}`, code: 400 };
+	}
+
+	const creditsPerGen = getGenerationCost(imgModel, { aspect_ratio: '16:9' }, keyData.tier);
+	const totalCredits = creditsPerGen * 3;
+
+	const budget = await checkBudget(env, keyData.key, keyData.tier, totalCredits);
+	if (!budget.allowed) {
+		return {
+			error: `Monthly credit limit reached. Thumbnails cost ${totalCredits} credits (${creditsPerGen} x 3).`,
+			code: 402,
+			usage: { spent: budget.spent, limit: budget.limit, thumbnail_credits: totalCredits },
+		};
+	}
+
+	// Build context string from campaign data
+	const takeawayText = Array.isArray(key_takeaways) && key_takeaways.length > 0
+		? key_takeaways.slice(0, 3).join(', ')
+		: '';
+	const pillar = content_pillar || 'general';
+	const styleHint = style || 'bold and high-contrast';
+
+	// 3 prompt variants (from content-system-productization.md spec)
+	const variants = [
+		{
+			label: 'A',
+			description: 'Face + tool logos + bold text overlay',
+			prompt: `YouTube thumbnail, 16:9. Topic: "${title}". Bold large text overlay reading "${hook}". Show a confident person's face expressing excitement, with relevant tool logos or icons floating nearby. ${pillar} theme. Style: ${styleHint}, vibrant colors, high contrast, professional YouTube thumbnail composition. ${takeawayText ? `Key concepts: ${takeawayText}.` : ''}`,
+		},
+		{
+			label: 'B',
+			description: 'Stat/number as hero element + minimal face',
+			prompt: `YouTube thumbnail, 16:9. Topic: "${title}". Large bold number or statistic as the hero element, taking up most of the frame. Small face or silhouette in the corner showing surprise. Text: "${hook}". ${pillar} theme. Style: ${styleHint}, clean layout, dramatic typography, single accent color pop against dark or contrasting background. ${takeawayText ? `Key stat context: ${takeawayText}.` : ''}`,
+		},
+		{
+			label: 'C',
+			description: 'Visual metaphor + text (no face)',
+			prompt: `YouTube thumbnail, 16:9. Topic: "${title}". Strong visual metaphor representing the concept (no human face). Bold text overlay: "${hook}". ${pillar} theme. Style: ${styleHint}, cinematic composition, conceptual imagery, icon-driven design, eye-catching colors. ${takeawayText ? `Visual concepts: ${takeawayText}.` : ''}`,
+		},
+	];
+
+	// Fire all 3 generations in parallel
+	const tasks = await Promise.all(variants.map(async (v) => {
+		const kieBody = buildKieBody(imgModel, v.prompt, { aspect_ratio: '16:9' });
+		const result = await kieRequest('/jobs/createTask', kieBody, env);
+		await trackUsage(env, keyData.key, creditsPerGen, imgModel, false);
+		return {
+			variant: v.label,
+			description: v.description,
+			task_id: result.data?.taskId || null,
+			model: imgModel,
+			credits: creditsPerGen,
+			status: result.code === 200 ? 'submitted' : 'failed',
+			error: result.code !== 200 ? result.msg : undefined,
+		};
+	}));
+
+	return {
+		data: {
+			campaign_title: title,
+			variants: tasks,
+			total_credits: totalCredits,
+			budget_remaining: (budget.remaining || 0) - totalCredits,
+			next_steps: {
+				poll: 'GET /v1/tasks/{task_id} — check generation status',
+				download: 'GET /v1/tasks/{task_id}/download — get permanent R2 URL',
+			},
+		},
+		code: 200,
+	};
+}
+
 async function handleTaskStatus(taskId, env) {
 	if (!taskId) return { error: 'task_id is required', code: 400 };
 	const result = await kieGet(`/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, env);
@@ -1080,6 +1163,7 @@ export default {
 				endpoints: {
 					'POST /v1/generate': { description: 'Generate image or video', body: { model: 'string', prompt: 'string', cache: 'boolean (default true)', '...': 'model-specific' } },
 					'POST /v1/pipelines/run': { description: 'Run a multi-step pipeline', body: { pipeline: 'string', prompt: 'string' } },
+					'POST /v1/thumbnails/generate': { description: 'Generate 3 campaign-aware thumbnail concepts', body: { title: 'string', hook: 'string', key_takeaways: 'string[] (optional)', content_pillar: 'string (optional)', style: 'string (optional)', model: 'string (optional, default gpt-5.4-image)' } },
 					'POST /v1/chat/completions': { description: 'OpenAI-compatible chat completions proxy (supports streaming)', body: { model: 'string', messages: 'array', stream: 'boolean' } },
 					'POST /v1/embeddings': { description: 'OpenAI-compatible embeddings proxy', body: { model: 'string', input: 'string|array' } },
 					'POST /v1/audio/transcriptions': { description: 'OpenAI-compatible audio transcription proxy', body: 'multipart/form-data with file + model' },
@@ -1288,6 +1372,15 @@ export default {
 			try { body = await request.json(); }
 			catch { return json({ error: 'Invalid JSON body' }, 400, headers); }
 			const result = await handlePipeline(body, env, keyData);
+			return json(result.data || { error: result.error, usage: result.usage }, result.code, headers);
+		}
+
+		// POST /v1/thumbnails/generate — campaign-aware thumbnail concepts
+		if (url.pathname === '/v1/thumbnails/generate' && request.method === 'POST') {
+			let body;
+			try { body = await request.json(); }
+			catch { return json({ error: 'Invalid JSON body' }, 400, headers); }
+			const result = await handleThumbnailGenerate(body, env, keyData);
 			return json(result.data || { error: result.error, usage: result.usage }, result.code, headers);
 		}
 
