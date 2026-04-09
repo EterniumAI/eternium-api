@@ -904,7 +904,7 @@ async function handleThumbnailGenerate(body, env, keyData) {
 	if (!title) return { error: 'title is required', code: 400 };
 	if (!hook) return { error: 'hook is required', code: 400 };
 
-	const imgModel = model || 'gpt-5.4-image';
+	const imgModel = model || 'nano-banana-2';
 	if (!MODELS[imgModel] || MODELS[imgModel].type !== 'image') {
 		return { error: `Invalid image model: ${imgModel}. Available: ${Object.keys(MODELS).filter(m => MODELS[m].type === 'image').join(', ')}`, code: 400 };
 	}
@@ -1163,7 +1163,7 @@ export default {
 				endpoints: {
 					'POST /v1/generate': { description: 'Generate image or video', body: { model: 'string', prompt: 'string', cache: 'boolean (default true)', '...': 'model-specific' } },
 					'POST /v1/pipelines/run': { description: 'Run a multi-step pipeline', body: { pipeline: 'string', prompt: 'string' } },
-					'POST /v1/thumbnails/generate': { description: 'Generate 3 campaign-aware thumbnail concepts', body: { title: 'string', hook: 'string', key_takeaways: 'string[] (optional)', content_pillar: 'string (optional)', style: 'string (optional)', model: 'string (optional, default gpt-5.4-image)' } },
+					'POST /v1/thumbnails/generate': { description: 'Generate 3 campaign-aware thumbnail concepts', body: { title: 'string', hook: 'string', key_takeaways: 'string[] (optional)', content_pillar: 'string (optional)', style: 'string (optional)', model: 'string (optional, default nano-banana-2)' } },
 					'POST /v1/chat/completions': { description: 'OpenAI-compatible chat completions proxy (supports streaming)', body: { model: 'string', messages: 'array', stream: 'boolean' } },
 					'POST /v1/embeddings': { description: 'OpenAI-compatible embeddings proxy', body: { model: 'string', input: 'string|array' } },
 					'POST /v1/audio/transcriptions': { description: 'OpenAI-compatible audio transcription proxy', body: 'multipart/form-data with file + model' },
