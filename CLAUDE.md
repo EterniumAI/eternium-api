@@ -104,6 +104,7 @@ Admin routes require an API key whose email matches `ADMIN_EMAIL` (ty@eternium.a
 - `PATCH /admin/tenants/:id` — update tenant
 - `POST /admin/users/:email/revoke` — suspend user
 - `POST /admin/users/:email/activate` — reactivate user
+- `POST /admin/test-invite` — test GitHub repo invite (bypasses Stripe webhook)
 
 ### Webhooks
 - `POST /webhooks/stripe` — subscription, Armory product, hosting events

@@ -526,7 +526,7 @@ export async function handleStripeSuccess(request, env) {
 }
 
 // ── GitHub repo invite for Armory product purchases ────────────
-async function inviteToGitHubRepo(env, repo, githubUsername) {
+export async function inviteToGitHubRepo(env, repo, githubUsername) {
 	if (!env.GITHUB_PAT || !githubUsername) return { ok: false, error: 'Missing PAT or username' };
 	const [owner, repoName] = repo.split('/');
 	const url = `https://api.github.com/repos/${owner}/${repoName}/collaborators/${githubUsername}`;
@@ -566,13 +566,19 @@ export async function handleStripeWebhook(request, env) {
 			const productId = session.metadata?.product_id;
 			const armoryProduct = productId ? ARMORY_PRODUCTS[productId] : null;
 			if (armoryProduct) {
-				const githubUsername = session.metadata?.github_username;
+				// Read github_username from metadata (website create-checkout flow)
+				// or from custom_fields (Stripe Payment Links / native custom field flow)
+				let githubUsername = session.metadata?.github_username;
+				if (!githubUsername && Array.isArray(session.custom_fields)) {
+					const field = session.custom_fields.find(f => f.key === 'github_username');
+					githubUsername = field?.text?.value;
+				}
 				const customerEmail = session.customer_email || session.customer_details?.email || session.metadata?.email;
 				if (githubUsername) {
-					const result = await inviteToGitHubRepo(env, armoryProduct.repo, githubUsername);
+					const result = await inviteToGitHubRepo(env, armoryProduct.repo, githubUsername.trim());
 					console.log(`[Armory] ${armoryProduct.name}: invited ${githubUsername} → ${result.status || result.error}`);
 				} else {
-					console.log(`[Armory] ${armoryProduct.name}: no github_username in metadata, email=${customerEmail}. Manual invite needed.`);
+					console.log(`[Armory] ${armoryProduct.name}: no github_username in metadata or custom_fields, email=${customerEmail}. Manual invite needed.`);
 				}
 				break;
 			}
@@ -850,4 +856,27 @@ export async function handleAdminActivate(email, env) {
 		}));
 	}
 	return { data: { activated: true, email }, code: 200 };
+}
+
+// ── Admin: test GitHub repo invite (bypasses Stripe webhook) ───
+export async function handleAdminTestInvite(request, env) {
+	if (!env.GITHUB_PAT) return { error: 'GITHUB_PAT not configured on Worker', code: 500 };
+
+	let body;
+	try { body = await request.json(); }
+	catch { return { error: 'Invalid JSON body', code: 400 }; }
+
+	const { repo, github_username } = body;
+	if (!repo || !github_username) {
+		return { error: 'repo and github_username required', code: 400 };
+	}
+	if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo)) {
+		return { error: 'repo must be in "owner/name" format', code: 400 };
+	}
+
+	const result = await inviteToGitHubRepo(env, repo, github_username.trim());
+	if (!result.ok) {
+		return { error: result.error || 'Invite failed', data: result, code: result.status || 500 };
+	}
+	return { data: { repo, github_username, ...result }, code: 200 };
 }

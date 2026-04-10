@@ -21,7 +21,7 @@
 import {
 	handleSignup, handleLogin, handleCheckout, handleProvisionKey, handleRegenerateKey,
 	handleStripeSuccess, handleStripeWebhook,
-	handleAdminOverview, handleAdminRevoke, handleAdminActivate,
+	handleAdminOverview, handleAdminRevoke, handleAdminActivate, handleAdminTestInvite,
 	resolveJWTAuth, resolveSupabaseUser,
 } from './auth.js';
 
@@ -1285,6 +1285,11 @@ export default {
 			const activateMatch = url.pathname.match(/^\/admin\/users\/(.+)\/activate$/);
 			if (activateMatch) {
 				const result = await handleAdminActivate(decodeURIComponent(activateMatch[1]), env);
+				return json(result.data || { error: result.error }, result.code, cors);
+			}
+
+			if (url.pathname === '/admin/test-invite' && request.method === 'POST') {
+				const result = await handleAdminTestInvite(request, env);
 				return json(result.data || { error: result.error }, result.code, cors);
 			}
 
