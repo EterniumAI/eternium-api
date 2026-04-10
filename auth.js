@@ -393,15 +393,104 @@ export async function handleStripeSuccess(request, env) {
 	return { data: { api_key: apiKey, tier, email }, code: 200 };
 }
 
-// ── GitHub repo invite for Armory product purchases ────────────
-export async function inviteToGitHubRepo(env, repo, githubUsername) {
-	if (!env.GITHUB_PAT || !githubUsername) return { ok: false, error: 'Missing PAT or username' };
+// ── GitHub App auth (preferred) ────────────────────────────────
+// Signs an RS256 JWT with the App private key, exchanges it for an
+// installation token (1 hr lifetime), caches the token in KV.
+// Falls back to GITHUB_PAT if App is not configured or fails.
+
+function b64urlFromBytes(bytes) {
+	let str = '';
+	for (const b of bytes) str += String.fromCharCode(b);
+	return btoa(str).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+function b64urlFromJSON(obj) {
+	return btoa(JSON.stringify(obj)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+async function generateAppJWT(env) {
+	const now = Math.floor(Date.now() / 1000);
+	const payload = {
+		iat: now - 60,              // 60s back-dated for clock skew
+		exp: now + 600,             // 10 min lifetime (GitHub max)
+		iss: env.GITHUB_APP_ID,     // App ID
+	};
+
+	const pem = env.GITHUB_APP_PRIVATE_KEY;
+	const keyData = pem
+		.replace(/-----BEGIN PRIVATE KEY-----/, '')
+		.replace(/-----END PRIVATE KEY-----/, '')
+		.replace(/-----BEGIN RSA PRIVATE KEY-----/, '')
+		.replace(/-----END RSA PRIVATE KEY-----/, '')
+		.replace(/\s/g, '');
+	const binaryKey = Uint8Array.from(atob(keyData), c => c.charCodeAt(0));
+
+	const cryptoKey = await crypto.subtle.importKey(
+		'pkcs8',
+		binaryKey,
+		{ name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+		false,
+		['sign']
+	);
+
+	const header = { alg: 'RS256', typ: 'JWT' };
+	const signingInput = `${b64urlFromJSON(header)}.${b64urlFromJSON(payload)}`;
+	const sig = await crypto.subtle.sign(
+		'RSASSA-PKCS1-v1_5',
+		cryptoKey,
+		new TextEncoder().encode(signingInput)
+	);
+	return `${signingInput}.${b64urlFromBytes(new Uint8Array(sig))}`;
+}
+
+async function getInstallationToken(env) {
+	// Check KV cache (installation tokens last ~1 hour)
+	const cached = await env.CACHE?.get('github_app_installation_token');
+	if (cached) {
+		try {
+			const { token, expiresAt } = JSON.parse(cached);
+			if (token && expiresAt > Date.now() + 60000) return token;
+		} catch {}
+	}
+
+	const jwt = await generateAppJWT(env);
+	const res = await fetch(
+		`https://api.github.com/app/installations/${env.GITHUB_APP_INSTALLATION_ID}/access_tokens`,
+		{
+			method: 'POST',
+			headers: {
+				Authorization: `Bearer ${jwt}`,
+				Accept: 'application/vnd.github+json',
+				'X-GitHub-Api-Version': '2022-11-28',
+				'User-Agent': 'Eternium-API-Worker',
+			},
+		}
+	);
+
+	if (!res.ok) {
+		const err = await res.text();
+		throw new Error(`GitHub App token exchange failed: ${res.status} ${err}`);
+	}
+
+	const data = await res.json();
+	const expiresAt = new Date(data.expires_at).getTime();
+	const ttlSeconds = Math.max(60, Math.floor((expiresAt - Date.now()) / 1000) - 60);
+
+	await env.CACHE?.put(
+		'github_app_installation_token',
+		JSON.stringify({ token: data.token, expiresAt }),
+		{ expirationTtl: ttlSeconds }
+	);
+
+	return data.token;
+}
+
+async function inviteViaToken(token, repo, githubUsername) {
 	const [owner, repoName] = repo.split('/');
 	const url = `https://api.github.com/repos/${owner}/${repoName}/collaborators/${githubUsername}`;
 	const res = await fetch(url, {
 		method: 'PUT',
 		headers: {
-			Authorization: `Bearer ${env.GITHUB_PAT}`,
+			Authorization: `Bearer ${token}`,
 			Accept: 'application/vnd.github+json',
 			'X-GitHub-Api-Version': '2022-11-28',
 			'User-Agent': 'Eternium-API-Worker',
@@ -412,6 +501,34 @@ export async function inviteToGitHubRepo(env, repo, githubUsername) {
 	if (res.status === 204) return { ok: true, status: 'already-collaborator' };
 	const body = await res.text();
 	return { ok: false, status: res.status, error: body };
+}
+
+// ── GitHub repo invite for Armory product purchases ────────────
+// Prefers GitHub App flow (auto-rotating installation tokens).
+// Falls back to GITHUB_PAT for the 7-day soak period.
+export async function inviteToGitHubRepo(env, repo, githubUsername) {
+	if (!githubUsername) return { ok: false, error: 'Missing username' };
+
+	// Try GitHub App flow first
+	if (env.GITHUB_APP_ID && env.GITHUB_APP_INSTALLATION_ID && env.GITHUB_APP_PRIVATE_KEY) {
+		try {
+			const token = await getInstallationToken(env);
+			const result = await inviteViaToken(token, repo, githubUsername);
+			if (result.ok) {
+				console.log(`[GitHub] invite via App: ${repo} -> ${githubUsername} (${result.status})`);
+				return { ...result, via: 'app' };
+			}
+			console.warn(`[GitHub] App invite failed (${result.status}): ${result.error}. Falling back to PAT.`);
+		} catch (err) {
+			console.warn(`[GitHub] App flow threw: ${err.message}. Falling back to PAT.`);
+		}
+	}
+
+	// Fallback: PAT (7-day soak period — remove after GitHub App flow is stable)
+	if (!env.GITHUB_PAT) return { ok: false, error: 'No GitHub auth configured (App or PAT)' };
+	const result = await inviteViaToken(env.GITHUB_PAT, repo, githubUsername);
+	if (result.ok) console.log(`[GitHub] invite via PAT fallback: ${repo} -> ${githubUsername} (${result.status})`);
+	return { ...result, via: 'pat' };
 }
 
 export async function handleStripeWebhook(request, env) {
@@ -728,7 +845,10 @@ export async function handleAdminActivate(email, env) {
 
 // ── Admin: test GitHub repo invite (bypasses Stripe webhook) ───
 export async function handleAdminTestInvite(request, env) {
-	if (!env.GITHUB_PAT) return { error: 'GITHUB_PAT not configured on Worker', code: 500 };
+	const hasApp = env.GITHUB_APP_ID && env.GITHUB_APP_INSTALLATION_ID && env.GITHUB_APP_PRIVATE_KEY;
+	if (!hasApp && !env.GITHUB_PAT) {
+		return { error: 'No GitHub auth configured (need GitHub App or GITHUB_PAT)', code: 500 };
+	}
 
 	let body;
 	try { body = await request.json(); }
