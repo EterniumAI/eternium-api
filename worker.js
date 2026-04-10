@@ -8,7 +8,8 @@
  *   OPENAI_API_KEY         — OpenAI API key (for chat, embeddings, audio proxy)
  *   STRIPE_SECRET_KEY      — Stripe API key
  *   STRIPE_WEBHOOK_SECRET  — Stripe webhook signing secret
- *   JWT_SECRET             — Session token secret
+ *   SUPABASE_JWT_SECRET    — Supabase JWT verification secret
+ *   SUPABASE_PROJECT_REF   — Supabase project ref for issuer validation
  *   ADMIN_EMAIL            — Admin email (ty@eternium.ai)
  *
  * KV Namespaces (bind in wrangler.toml):
@@ -19,7 +20,7 @@
  */
 
 import {
-	handleSignup, handleLogin, handleCheckout, handleProvisionKey, handleRegenerateKey,
+	handleCheckout, handleProvisionKey, handleRegenerateKey,
 	handleStripeSuccess, handleStripeWebhook,
 	handleAdminOverview, handleAdminRevoke, handleAdminActivate, handleAdminTestInvite,
 	resolveJWTAuth, resolveSupabaseUser,
@@ -1188,15 +1189,7 @@ export default {
 			}, 200, cors);
 		}
 
-		// ── Auth routes (public) ─────────────────────────────────────
-		if (url.pathname === '/auth/signup' && request.method === 'POST') {
-			const result = await handleSignup(request, env);
-			return json(result.data || { error: result.error }, result.code, cors);
-		}
-		if (url.pathname === '/auth/login' && request.method === 'POST') {
-			const result = await handleLogin(request, env);
-			return json(result.data || { error: result.error }, result.code, cors);
-		}
+		// ── Auth routes ──────────────────────────────────────────────
 		if (url.pathname === '/auth/checkout' && request.method === 'POST') {
 			const result = await handleCheckout(request, env);
 			return json(result.data || { error: result.error }, result.code, cors);

@@ -149,8 +149,14 @@
   <footer>&copy; 2026 Eternium LLC</footer>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
 const BASE = window.location.origin;
+const SUPABASE_URL = 'https://wmahfjguvqvefgjpbcdc.supabase.co';
+// TODO: Replace with real anon key from Supabase dashboard (Project Settings > API)
+const SUPABASE_ANON_KEY = 'sb_publishable_ZgilUeGnprKSwOAUGHiyYg_apkYouNQ';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 let sessionToken = '';
 let selectedTier = 'free';
 let generatedKey = '';
@@ -185,14 +191,14 @@ async function signup() {
   btn.textContent = 'Creating...';
 
   try {
-    const res = await fetch(`${BASE}/auth/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name }),
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { name: name || email.split('@')[0] } },
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Signup failed');
-    sessionToken = data.token;
+    if (error) throw error;
+    if (!data.session) throw new Error('Check your email to confirm your account, then sign in.');
+    sessionToken = data.session.access_token;
     showStep('2');
   } catch (e) {
     showError('signup-error', e.message);
@@ -214,20 +220,21 @@ async function login() {
   btn.textContent = 'Signing in...';
 
   try {
-    const res = await fetch(`${BASE}/auth/login`, {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    sessionToken = data.session.access_token;
+    // Check if user already has an API key via provision-key (will 409 if exists)
+    const res = await fetch(`${BASE}/auth/provision-key`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+      body: JSON.stringify({ tier: 'free' }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Login failed');
-    sessionToken = data.token;
-    if (data.api_key) {
+    if (res.status === 409) {
       // Already has a key — go to dashboard
       window.location.href = '/dashboard';
-    } else {
-      showStep('2');
+      return;
     }
+    showStep('2');
   } catch (e) {
     showError('login-error', e.message);
   } finally {

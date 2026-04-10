@@ -1,8 +1,8 @@
 # Eternium API
 
 ## Identity
-This is the **Eternium API** — a Cloudflare Worker that serves as the public AI generation API for Eternium LLC.
-Read `../Sovereign/SOUL.md` for personality and chain of command.
+You are a senior developer at Eternium LLC, working under the CTO (Sovereign).
+Cut the fluff, lead with action. Commit to feature branches, PR to main.
 
 ## Project Overview
 - **What:** REST API proxying Kie.ai for image/video generation, OpenAI for chat/embeddings/audio, with auth, billing (Stripe), usage tracking, caching, multi-step pipelines, content API, managed hosting, and R2 media storage
@@ -16,7 +16,7 @@ Read `../Sovereign/SOUL.md` for personality and chain of command.
 ```
 eternium-api/
 ├── worker.js          # Main Worker — routing, generation, pipelines, thumbnails, usage, content API
-├── auth.js            # Auth module — signup, login, Stripe, admin, Armory webhooks
+├── auth.js            # Auth module — Supabase JWT, Stripe, admin, Armory webhooks
 ├── tenant.js          # Managed hosting — tenant resolution, CRUD, subdomain routing
 ├── media.js           # R2 media — upload, serve, delete
 ├── wrangler.toml      # Cloudflare config + KV bindings + R2 bucket + routes
@@ -55,8 +55,9 @@ Two auth mechanisms:
 1. **API key:** `X-API-Key: etrn_...` header or `Authorization: Bearer etrn_...`
    - Used for all generation, usage, media, and content endpoints
    - Keys stored in KV namespace `API_KEYS` with tier + rate limit metadata
-2. **JWT:** `Authorization: Bearer <jwt>` — used for account management (signup/login/checkout/provision-key)
-   - 1-hour expiry, HMAC-SHA256 signed with `JWT_SECRET`
+2. **Supabase JWT:** `Authorization: Bearer <jwt>` — used for account management (checkout/provision-key)
+   - Issued by Supabase Auth, verified with `SUPABASE_JWT_SECRET`
+   - Signup/login handled entirely by Supabase (no custom auth in API)
 
 Admin routes require an API key whose email matches `ADMIN_EMAIL` (ty@eternium.ai).
 
@@ -76,9 +77,7 @@ Admin routes require an API key whose email matches `ADMIN_EMAIL` (ty@eternium.a
 - `GET /media/generations/:id` — permanent media URLs (R2)
 - `GET /v1/media/:key` — general R2 media
 
-### Auth (JWT)
-- `POST /auth/signup` — create account
-- `POST /auth/login` — login
+### Auth (Supabase JWT)
 - `POST /auth/checkout` — Stripe checkout
 - `POST /auth/provision-key` — get API key
 - `POST /auth/regenerate-key` — rotate API key
@@ -157,10 +156,32 @@ The API is the **compute layer**. Other services call it:
 - `OPENROUTER_API_KEY` — fallback provider (optional)
 - `STRIPE_SECRET_KEY` — billing
 - `STRIPE_WEBHOOK_SECRET` — webhook verification
-- `JWT_SECRET` — session tokens
+- `SUPABASE_JWT_SECRET` — Supabase JWT verification (HS256)
+- `SUPABASE_PROJECT_REF` — Supabase project ref for issuer validation
 - `GITHUB_PAT` — Armory product repo invitations
 - `SUPABASE_URL` — content API backend
 - `SUPABASE_SERVICE_KEY` — content API auth
+
+## Cross-Instance Coordination
+
+This repo participates in the Sovereign Context Protocol (SCP) multi-instance system.
+
+**On startup, check for pending handoffs:**
+1. Read `C:\Eternium\Sovereign\handoffs\_routing.md` -- look for rows where Target = `eternium-api`
+2. Read any referenced handoff files for your tasks
+3. Update `C:\Eternium\Sovereign\handoffs\_active.json` with your instance status
+
+**After completing significant work or hitting a blocker:**
+1. Update your entry in `_active.json` (lastCompleted, nextAction, status)
+2. Write a reply handoff to `handoffs/eternium-api-to-sovereign.md` with what was done, what changed, and what's needed next
+3. Append a row to `_routing.md` targeting `sovereign`
+4. Tell Ty: "Handoff written for **sovereign**"
+
+- **Handoff hub:** `C:\Eternium\Sovereign\handoffs\`
+- **Protocol:** See `handoffs/PROTOCOL.md` for conventions
+- **SCP handoffs:** Also check `C:\Eternium\Sovereign\state\handoffs.json` for `"to": "eternium-api"` entries with `"status": "active"`
+
+Commit your changes before writing a handoff.
 
 ## Environment
 - **Platform:** Cloudflare Workers
