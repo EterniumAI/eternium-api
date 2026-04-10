@@ -6,8 +6,7 @@
  *   STRIPE_SECRET_KEY      — Stripe API key (sk_live_...)
  *   STRIPE_WEBHOOK_SECRET  — Stripe webhook signing secret (whsec_...)
  *   ADMIN_EMAIL            — Admin email (ty@eternium.ai)
- *   JWT_SECRET             — Token signing secret
- *   SUPABASE_JWT_SECRET    — Supabase JWT signing secret (HS256, dual auth)
+ *   SUPABASE_JWT_SECRET    — Supabase JWT signing secret (HS256)
  *   SUPABASE_PROJECT_REF   — Supabase project ref for issuer validation (env var in wrangler.toml)
  *
  * KV Namespaces:
@@ -55,65 +54,11 @@ const TENANT_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
 const MRR_VALUES = { free: 0, starter: 29, builder: 79, scale: 199, enterprise: 0, partner: 0, internal: 0 };
 
 // ── Crypto helpers ──────────────────────────────────────────────
-async function hashPassword(password, existingSalt = null) {
-	const salt = existingSalt || crypto.getRandomValues(new Uint8Array(16));
-	const keyMaterial = await crypto.subtle.importKey(
-		'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']
-	);
-	const hash = await crypto.subtle.deriveBits(
-		{ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-		keyMaterial, 256
-	);
-	const saltHex = Array.from(new Uint8Array(salt)).map(b => b.toString(16).padStart(2, '0')).join('');
-	const hashHex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-	return `${saltHex}:${hashHex}`;
-}
-
-async function verifyPassword(password, storedHash) {
-	if (!storedHash || !storedHash.includes(':')) {
-		const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
-		const legacyHash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-		return legacyHash === storedHash;
-	}
-	const [saltHex] = storedHash.split(':');
-	const salt = new Uint8Array(saltHex.match(/.{2}/g).map(b => parseInt(b, 16)));
-	const newHash = await hashPassword(password, salt);
-	return newHash === storedHash;
-}
-
 function generateApiKey() {
 	const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
 	const rand = Array.from(crypto.getRandomValues(new Uint8Array(32)))
 		.map(b => chars[b % chars.length]).join('');
 	return `etrn_${rand}`;
-}
-
-async function signJWT(payload, secret) {
-	const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-	const body = btoa(JSON.stringify(payload));
-	const msg = `${header}.${body}`;
-	const key = await crypto.subtle.importKey(
-		'raw', new TextEncoder().encode(secret),
-		{ name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
-	);
-	const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(msg));
-	return `${msg}.${btoa(String.fromCharCode(...new Uint8Array(sig)))}`;
-}
-
-async function verifyJWT(token, secret) {
-	try {
-		const [header, body, sig] = token.split('.');
-		const key = await crypto.subtle.importKey(
-			'raw', new TextEncoder().encode(secret),
-			{ name: 'HMAC', hash: 'SHA-256' }, false, ['verify']
-		);
-		const sigBytes = Uint8Array.from(atob(sig), c => c.charCodeAt(0));
-		const valid = await crypto.subtle.verify('HMAC', key, sigBytes, new TextEncoder().encode(`${header}.${body}`));
-		if (!valid) return null;
-		const payload = JSON.parse(atob(body));
-		if (payload.exp !== undefined && payload.exp !== null && payload.exp < Math.floor(Date.now() / 1000)) return null;
-		return payload;
-	} catch { return null; }
 }
 
 // ── Supabase JWT verification (HS256, base64url) ───────────────
@@ -144,24 +89,15 @@ async function verifySupabaseJWT(token, secret, expectedIssuer) {
 	} catch { return null; }
 }
 
-// Resolve JWT auth — tries custom JWT first, then Supabase JWT.
-// Returns { email, source, supabaseUid? } or null.
+// Resolve JWT auth — Supabase JWT only.
+// Returns { email, source: 'supabase', supabaseUid } or null.
 export async function resolveJWTAuth(token, env) {
-	if (!token) return null;
+	if (!token || !env.SUPABASE_JWT_SECRET) return null;
 
-	// Try custom JWT first (existing HMAC-SHA256)
-	if (env.JWT_SECRET) {
-		const payload = await verifyJWT(token, env.JWT_SECRET);
-		if (payload) return { email: payload.sub, source: 'custom' };
-	}
-
-	// Try Supabase JWT (sub = UUID, email = email)
-	if (env.SUPABASE_JWT_SECRET) {
-		const projectRef = env.SUPABASE_PROJECT_REF || 'wmahfjguvqvefgjpbcdc';
-		const issuer = `https://${projectRef}.supabase.co/auth/v1`;
-		const payload = await verifySupabaseJWT(token, env.SUPABASE_JWT_SECRET, issuer);
-		if (payload) return { email: payload.email, source: 'supabase', supabaseUid: payload.sub };
-	}
+	const projectRef = env.SUPABASE_PROJECT_REF || 'wmahfjguvqvefgjpbcdc';
+	const issuer = `https://${projectRef}.supabase.co/auth/v1`;
+	const payload = await verifySupabaseJWT(token, env.SUPABASE_JWT_SECRET, issuer);
+	if (payload) return { email: payload.email, source: 'supabase', supabaseUid: payload.sub };
 
 	return null;
 }
@@ -294,70 +230,6 @@ async function provisionKey(env, email, tier, name) {
 
 // ── Route handlers ──────────────────────────────────────────────
 
-export async function handleSignup(request, env) {
-	let body;
-	try { body = await request.json(); }
-	catch { return { error: 'Invalid request body', code: 400 }; }
-
-	const { email, password, name } = body;
-	if (!email || !password) return { error: 'Email and password required', code: 400 };
-	if (password.length < 8) return { error: 'Password must be at least 8 characters', code: 400 };
-
-	// Check existing
-	const existing = await getUser(env, email);
-	if (existing) return { error: 'Account already exists. Please sign in.', code: 409 };
-
-	const passwordHash = await hashPassword(password);
-	const user = {
-		email: email.toLowerCase(),
-		name: name || '',
-		passwordHash,
-		tier: 'free',
-		apiKey: null,
-		stripeCustomerId: null,
-		createdAt: new Date().toISOString(),
-		active: true,
-	};
-
-	await saveUser(env, user);
-
-	if (!env.JWT_SECRET) return { error: 'Server misconfigured: JWT_SECRET not set', code: 500 };
-	const secret = env.JWT_SECRET;
-	const token = await signJWT({
-		sub: user.email,
-		iat: Math.floor(Date.now() / 1000),
-		exp: Math.floor(Date.now() / 1000) + 3600,
-	}, secret);
-
-	return { data: { token, email: user.email }, code: 200 };
-}
-
-export async function handleLogin(request, env) {
-	let body;
-	try { body = await request.json(); }
-	catch { return { error: 'Invalid request body', code: 400 }; }
-
-	const { email, password } = body;
-	if (!email || !password) return { error: 'Email and password required', code: 400 };
-
-	const user = await getUser(env, email);
-	if (!user) return { error: 'Invalid credentials', code: 401 };
-
-	const valid = await verifyPassword(password, user.passwordHash);
-	if (!valid) return { error: 'Invalid credentials', code: 401 };
-	if (user.active === false) return { error: 'Account suspended', code: 403 };
-
-	if (!env.JWT_SECRET) return { error: 'Server misconfigured: JWT_SECRET not set', code: 500 };
-	const secret = env.JWT_SECRET;
-	const token = await signJWT({
-		sub: user.email,
-		iat: Math.floor(Date.now() / 1000),
-		exp: Math.floor(Date.now() / 1000) + 3600,
-	}, secret);
-
-	return { data: { token, email: user.email, api_key: user.apiKey }, code: 200 };
-}
-
 export async function handleCheckout(request, env) {
 	const authHeader = request.headers.get('Authorization') || '';
 	const token = authHeader.replace('Bearer ', '');
@@ -374,9 +246,7 @@ export async function handleCheckout(request, env) {
 		return { error: `Stripe price not configured for tier: ${tier}. Set STRIPE_PRICES in auth.js.`, code: 500 };
 	}
 
-	let user = auth.source === 'supabase'
-		? await ensureSupabaseUser(auth.email, auth.supabaseUid, env)
-		: await getUser(env, auth.email);
+	let user = await ensureSupabaseUser(auth.email, auth.supabaseUid, env);
 	if (!user) return { error: 'User not found', code: 404 };
 
 	// Create or get Stripe customer
@@ -418,9 +288,7 @@ export async function handleProvisionKey(request, env) {
 	try { body = await request.json(); }
 	catch { return { error: 'Invalid body', code: 400 }; }
 
-	let user = auth.source === 'supabase'
-		? await ensureSupabaseUser(auth.email, auth.supabaseUid, env)
-		: await getUser(env, auth.email);
+	let user = await ensureSupabaseUser(auth.email, auth.supabaseUid, env);
 	if (!user) return { error: 'User not found', code: 404 };
 
 	// Don't allow re-provisioning if key exists (they should use regenerate)
