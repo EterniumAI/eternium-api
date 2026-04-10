@@ -104,6 +104,7 @@ Admin routes require an API key whose email matches `ADMIN_EMAIL` (ty@eternium.a
 - `PATCH /admin/tenants/:id` — update tenant
 - `POST /admin/users/:email/revoke` — suspend user
 - `POST /admin/users/:email/activate` — reactivate user
+- `POST /admin/test-invite` — test GitHub repo invite (bypasses Stripe webhook)
 
 ### Webhooks
 - `POST /webhooks/stripe` — subscription, Armory product, hosting events
@@ -136,7 +137,7 @@ Models are defined in the `MODELS` object in worker.js (~line 145). Costs in `KI
   "key_takeaways": ["takeaway 1", "takeaway 2"],
   "content_pillar": "business",
   "style": "bold and dramatic",
-  "model": "gpt-5.4-image"
+  "model": "nano-banana-2"
 }
 ```
 

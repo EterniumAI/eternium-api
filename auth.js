@@ -7,6 +7,8 @@
  *   STRIPE_WEBHOOK_SECRET  — Stripe webhook signing secret (whsec_...)
  *   ADMIN_EMAIL            — Admin email (ty@eternium.ai)
  *   JWT_SECRET             — Token signing secret
+ *   SUPABASE_JWT_SECRET    — Supabase JWT signing secret (HS256, dual auth)
+ *   SUPABASE_PROJECT_REF   — Supabase project ref for issuer validation (env var in wrangler.toml)
  *
  * KV Namespaces:
  *   USERS          — User records by email  { email, passwordHash, name, tier, apiKey, stripeCustomerId, createdAt, active }
@@ -109,9 +111,107 @@ async function verifyJWT(token, secret) {
 		const valid = await crypto.subtle.verify('HMAC', key, sigBytes, new TextEncoder().encode(`${header}.${body}`));
 		if (!valid) return null;
 		const payload = JSON.parse(atob(body));
-		if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+		if (payload.exp !== undefined && payload.exp !== null && payload.exp < Math.floor(Date.now() / 1000)) return null;
 		return payload;
 	} catch { return null; }
+}
+
+// ── Supabase JWT verification (HS256, base64url) ───────────────
+function base64UrlDecode(str) {
+	return atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+}
+
+async function verifySupabaseJWT(token, secret, expectedIssuer) {
+	try {
+		const parts = token.split('.');
+		if (parts.length !== 3) return null;
+		const [header, body, sig] = parts;
+
+		const key = await crypto.subtle.importKey(
+			'raw', new TextEncoder().encode(secret),
+			{ name: 'HMAC', hash: 'SHA-256' }, false, ['verify']
+		);
+		const sigBytes = Uint8Array.from(base64UrlDecode(sig), c => c.charCodeAt(0));
+		const valid = await crypto.subtle.verify('HMAC', key, sigBytes, new TextEncoder().encode(`${header}.${body}`));
+		if (!valid) return null;
+
+		const payload = JSON.parse(base64UrlDecode(body));
+		if (payload.exp !== undefined && payload.exp !== null && payload.exp < Math.floor(Date.now() / 1000)) return null;
+		if (!payload.email) return null;
+		if (expectedIssuer && payload.iss !== expectedIssuer) return null;
+
+		return payload;
+	} catch { return null; }
+}
+
+// Resolve JWT auth — tries custom JWT first, then Supabase JWT.
+// Returns { email, source, supabaseUid? } or null.
+export async function resolveJWTAuth(token, env) {
+	if (!token) return null;
+
+	// Try custom JWT first (existing HMAC-SHA256)
+	if (env.JWT_SECRET) {
+		const payload = await verifyJWT(token, env.JWT_SECRET);
+		if (payload) return { email: payload.sub, source: 'custom' };
+	}
+
+	// Try Supabase JWT (sub = UUID, email = email)
+	if (env.SUPABASE_JWT_SECRET) {
+		const projectRef = env.SUPABASE_PROJECT_REF || 'wmahfjguvqvefgjpbcdc';
+		const issuer = `https://${projectRef}.supabase.co/auth/v1`;
+		const payload = await verifySupabaseJWT(token, env.SUPABASE_JWT_SECRET, issuer);
+		if (payload) return { email: payload.email, source: 'supabase', supabaseUid: payload.sub };
+	}
+
+	return null;
+}
+
+// Ensure a KV user record exists for a Supabase-authed user. Returns the user object.
+export async function ensureSupabaseUser(email, supabaseUid, env) {
+	const lowerEmail = email.toLowerCase();
+	let user = await getUser(env, lowerEmail);
+
+	if (user) {
+		if (!user.supabaseUid && supabaseUid) {
+			user.supabaseUid = supabaseUid;
+			await saveUser(env, user);
+		}
+		return user;
+	}
+
+	// Write user record first (sentinel) to minimize race window
+	const newUser = {
+		email: lowerEmail,
+		name: lowerEmail.split('@')[0],
+		passwordHash: null,
+		tier: 'free',
+		apiKey: null,
+		supabaseUid,
+		stripeCustomerId: null,
+		createdAt: new Date().toISOString(),
+		active: true,
+	};
+	await saveUser(env, newUser);
+
+	// Re-read to catch concurrent writes (another request may have provisioned first)
+	return await getUser(env, lowerEmail);
+}
+
+// Resolve a Supabase-authed user to KV API key data. Auto-provisions if user is new.
+export async function resolveSupabaseUser(email, supabaseUid, env) {
+	const user = await ensureSupabaseUser(email, supabaseUid, env);
+	if (!user) return null;
+
+	if (user.apiKey && env.API_KEYS) {
+		const keyData = await env.API_KEYS.get(`key:${user.apiKey}`, 'json');
+		if (keyData) return keyData;
+	}
+
+	// Provision API key (use whatever key the user record has after re-read)
+	const apiKey = await provisionKey(env, user.email, user.tier || 'free', user.name);
+	user.apiKey = apiKey;
+	await saveUser(env, user);
+	return env.API_KEYS ? await env.API_KEYS.get(`key:${apiKey}`, 'json') : null;
 }
 
 // ── Stripe helpers ──────────────────────────────────────────────
@@ -261,10 +361,8 @@ export async function handleLogin(request, env) {
 export async function handleCheckout(request, env) {
 	const authHeader = request.headers.get('Authorization') || '';
 	const token = authHeader.replace('Bearer ', '');
-	if (!env.JWT_SECRET) return { error: 'Server misconfigured: JWT_SECRET not set', code: 500 };
-	const secret = env.JWT_SECRET;
-	const payload = await verifyJWT(token, secret);
-	if (!payload) return { error: 'Not authenticated', code: 401 };
+	const auth = await resolveJWTAuth(token, env);
+	if (!auth) return { error: 'Not authenticated', code: 401 };
 
 	let body;
 	try { body = await request.json(); }
@@ -276,7 +374,9 @@ export async function handleCheckout(request, env) {
 		return { error: `Stripe price not configured for tier: ${tier}. Set STRIPE_PRICES in auth.js.`, code: 500 };
 	}
 
-	const user = await getUser(env, payload.sub);
+	let user = auth.source === 'supabase'
+		? await ensureSupabaseUser(auth.email, auth.supabaseUid, env)
+		: await getUser(env, auth.email);
 	if (!user) return { error: 'User not found', code: 404 };
 
 	// Create or get Stripe customer
@@ -311,16 +411,16 @@ export async function handleCheckout(request, env) {
 export async function handleProvisionKey(request, env) {
 	const authHeader = request.headers.get('Authorization') || '';
 	const token = authHeader.replace('Bearer ', '');
-	if (!env.JWT_SECRET) return { error: 'Server misconfigured: JWT_SECRET not set', code: 500 };
-	const secret = env.JWT_SECRET;
-	const payload = await verifyJWT(token, secret);
-	if (!payload) return { error: 'Not authenticated', code: 401 };
+	const auth = await resolveJWTAuth(token, env);
+	if (!auth) return { error: 'Not authenticated', code: 401 };
 
 	let body;
 	try { body = await request.json(); }
 	catch { return { error: 'Invalid body', code: 400 }; }
 
-	const user = await getUser(env, payload.sub);
+	let user = auth.source === 'supabase'
+		? await ensureSupabaseUser(auth.email, auth.supabaseUid, env)
+		: await getUser(env, auth.email);
 	if (!user) return { error: 'User not found', code: 404 };
 
 	// Don't allow re-provisioning if key exists (they should use regenerate)
@@ -328,7 +428,8 @@ export async function handleProvisionKey(request, env) {
 		return { error: 'API key already exists. Use POST /auth/regenerate-key to rotate it.', code: 409 };
 	}
 
-	const tier = body.tier || user.tier || 'free';
+	const isAdmin = user.email.toLowerCase() === (env.ADMIN_EMAIL || 'ty@eternium.ai').toLowerCase();
+	const tier = isAdmin ? (body.tier || user.tier || 'free') : (user.tier || 'free');
 	const apiKey = await provisionKey(env, user.email, tier, user.name);
 
 	user.apiKey = apiKey;
@@ -357,11 +458,11 @@ export async function handleRegenerateKey(request, env) {
 				}
 			} catch { /* fall through to JWT */ }
 		}
-		// Fall back to JWT auth if API key lookup didn't find a user
-		if (!user && env.JWT_SECRET) {
-			const payload = await verifyJWT(bearerToken, env.JWT_SECRET);
-			if (payload) {
-				user = await getUser(env, payload.sub);
+		// Fall back to JWT auth (custom or Supabase) if API key lookup didn't find a user
+		if (!user) {
+			const auth = await resolveJWTAuth(bearerToken, env);
+			if (auth) {
+				user = await getUser(env, auth.email);
 			}
 		}
 	}
@@ -425,7 +526,7 @@ export async function handleStripeSuccess(request, env) {
 }
 
 // ── GitHub repo invite for Armory product purchases ────────────
-async function inviteToGitHubRepo(env, repo, githubUsername) {
+export async function inviteToGitHubRepo(env, repo, githubUsername) {
 	if (!env.GITHUB_PAT || !githubUsername) return { ok: false, error: 'Missing PAT or username' };
 	const [owner, repoName] = repo.split('/');
 	const url = `https://api.github.com/repos/${owner}/${repoName}/collaborators/${githubUsername}`;
@@ -465,13 +566,19 @@ export async function handleStripeWebhook(request, env) {
 			const productId = session.metadata?.product_id;
 			const armoryProduct = productId ? ARMORY_PRODUCTS[productId] : null;
 			if (armoryProduct) {
-				const githubUsername = session.metadata?.github_username;
+				// Read github_username from metadata (website create-checkout flow)
+				// or from custom_fields (Stripe Payment Links / native custom field flow)
+				let githubUsername = session.metadata?.github_username;
+				if (!githubUsername && Array.isArray(session.custom_fields)) {
+					const field = session.custom_fields.find(f => f.key === 'github_username');
+					githubUsername = field?.text?.value;
+				}
 				const customerEmail = session.customer_email || session.customer_details?.email || session.metadata?.email;
 				if (githubUsername) {
-					const result = await inviteToGitHubRepo(env, armoryProduct.repo, githubUsername);
+					const result = await inviteToGitHubRepo(env, armoryProduct.repo, githubUsername.trim());
 					console.log(`[Armory] ${armoryProduct.name}: invited ${githubUsername} → ${result.status || result.error}`);
 				} else {
-					console.log(`[Armory] ${armoryProduct.name}: no github_username in metadata, email=${customerEmail}. Manual invite needed.`);
+					console.log(`[Armory] ${armoryProduct.name}: no github_username in metadata or custom_fields, email=${customerEmail}. Manual invite needed.`);
 				}
 				break;
 			}
@@ -749,4 +856,27 @@ export async function handleAdminActivate(email, env) {
 		}));
 	}
 	return { data: { activated: true, email }, code: 200 };
+}
+
+// ── Admin: test GitHub repo invite (bypasses Stripe webhook) ───
+export async function handleAdminTestInvite(request, env) {
+	if (!env.GITHUB_PAT) return { error: 'GITHUB_PAT not configured on Worker', code: 500 };
+
+	let body;
+	try { body = await request.json(); }
+	catch { return { error: 'Invalid JSON body', code: 400 }; }
+
+	const { repo, github_username } = body;
+	if (!repo || !github_username) {
+		return { error: 'repo and github_username required', code: 400 };
+	}
+	if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo)) {
+		return { error: 'repo must be in "owner/name" format', code: 400 };
+	}
+
+	const result = await inviteToGitHubRepo(env, repo, github_username.trim());
+	if (!result.ok) {
+		return { error: result.error || 'Invite failed', data: result, code: result.status || 500 };
+	}
+	return { data: { repo, github_username, ...result }, code: 200 };
 }
