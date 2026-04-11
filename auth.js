@@ -738,6 +738,9 @@ export async function handleAdminOverview(env) {
 	let mrr = 0;
 	const modelCounts = {};
 
+	// 1 credit = $0.005  →  200 credits = $1.00
+	const CREDITS_PER_USD = 200;
+
 	const enrichedUsers = [];
 
 	for (const user of users) {
@@ -754,13 +757,15 @@ export async function handleAdminOverview(env) {
 			mrr += MRR_VALUES[user.tier] || 0;
 		}
 
-		// Model breakdown
+		// Model breakdown — tasks are stored as { model, credits, cached, ts }.
+		// Convert credits to USD before accumulating revenue/cost.
 		for (const task of (usage.tasks || [])) {
 			if (!modelCounts[task.model]) modelCounts[task.model] = { count: 0, revenue: 0, cost: 0 };
 			modelCounts[task.model].count++;
-			modelCounts[task.model].revenue += task.cost || 0;
+			const taskUSD = (task.credits || 0) / CREDITS_PER_USD;
+			modelCounts[task.model].revenue += taskUSD;
 			// Estimate Kie cost (~75% of our price, since we mark up ~30-35%)
-			modelCounts[task.model].cost += (task.cost || 0) * 0.75;
+			modelCounts[task.model].cost += taskUSD * 0.75;
 		}
 
 		enrichedUsers.push({
@@ -768,7 +773,8 @@ export async function handleAdminOverview(env) {
 			name: user.name,
 			tier: user.tier,
 			key: user.apiKey,
-			spent: usage.spent,
+			spent: usage.spent / CREDITS_PER_USD,   // USD for display
+			credits: usage.spent,                    // raw credits
 			generations: usage.generations,
 			cached: usage.cached,
 			created: user.createdAt,
@@ -777,13 +783,15 @@ export async function handleAdminOverview(env) {
 		});
 	}
 
-	const estimatedKieCost = totalSpent * 0.75;
+	// totalSpent is in credits — convert to USD before financial calculations.
+	const totalSpentUSD = totalSpent / CREDITS_PER_USD;
+	const estimatedKieCost = totalSpentUSD * 0.75;
 	const cacheHitRate = totalGens > 0 ? Math.round((totalCached / totalGens) * 100) : 0;
 
 	// Generate alerts
 	const alerts = [];
 	if (estimatedKieCost > mrr * 0.8) {
-		alerts.push({ level: 'danger', title: 'Cost Warning', message: `Kie.ai costs ($${estimatedKieCost.toFixed(2)}) are approaching your MRR ($${mrr}). Review pricing or reduce free tier.` });
+		alerts.push({ level: 'danger', title: 'Cost Warning', message: `Kie.ai costs ($${estimatedKieCost.toFixed(2)}) are approaching your MRR ($${mrr.toFixed(2)}). Review pricing or reduce free tier.` });
 	}
 	if (users.filter(u => u.tier === 'free').length > users.length * 0.9 && users.length > 10) {
 		alerts.push({ level: 'warning', title: 'Conversion Rate Low', message: `${Math.round((payingUsers / users.length) * 100)}% conversion. Consider limiting free tier or improving upgrade prompts.` });
@@ -797,7 +805,8 @@ export async function handleAdminOverview(env) {
 			total_users: users.length,
 			paying_users: payingUsers,
 			mrr,
-			total_spent: totalSpent,
+			total_spent: totalSpentUSD,      // USD (was credits — fixed)
+			total_credits: totalSpent,        // raw credit count for reference
 			total_generations: totalGens,
 			estimated_kie_cost: estimatedKieCost,
 			cache_hit_rate: cacheHitRate,
