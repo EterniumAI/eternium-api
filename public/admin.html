@@ -90,6 +90,7 @@
       <div class="stat"><div class="label">Paying Users</div><div class="val green" id="s-paying">0</div></div>
       <div class="stat"><div class="label">MRR</div><div class="val green" id="s-mrr">$0</div></div>
       <div class="stat"><div class="label">Total Revenue (MTD)</div><div class="val" id="s-revenue">$0</div></div>
+      <div class="stat"><div class="label">Credits Spent (MTD)</div><div class="val" id="s-credits">0</div></div>
       <div class="stat"><div class="label">Total Generations</div><div class="val" id="s-gens">0</div></div>
       <div class="stat"><div class="label">Kie.ai Cost (est)</div><div class="val yellow" id="s-cost">$0</div></div>
       <div class="stat"><div class="label">Gross Margin</div><div class="val green" id="s-margin">0%</div></div>
@@ -174,6 +175,7 @@ async function loadAll() {
     document.getElementById('s-paying').textContent = data.paying_users || 0;
     document.getElementById('s-mrr').textContent = '$' + (data.mrr || 0).toFixed(0);
     document.getElementById('s-revenue').textContent = '$' + (data.total_spent || 0).toFixed(2);
+    document.getElementById('s-credits').textContent = (data.total_credits || 0).toLocaleString();
     document.getElementById('s-gens').textContent = data.total_generations || 0;
     document.getElementById('s-cost').textContent = '$' + (data.estimated_kie_cost || 0).toFixed(2);
 
