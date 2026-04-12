@@ -1249,14 +1249,21 @@ export default {
 			return json(result.data || { error: result.error }, result.code, cors);
 		}
 
-		// ── Resource download (signed URL, no auth — URL is the credential) ──
+		// ── Resource endpoints (Supabase JWT auth or signed URL) ────────
+		// POST /resources/grant  — self-service: JWT user claims EP3 access
+		if (url.pathname === '/resources/grant' && request.method === 'POST') {
+			const result = await handleResourceGrant(request, env, null);
+			return json(result.data, result.code, cors);
+		}
+
+		// GET /resources/download?r=&exp=&sig=  — no auth, HMAC URL is the credential
 		if (url.pathname === '/resources/download' && request.method === 'GET') {
 			const res = await handleResourceDownload(request, env);
 			for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
 			return res;
 		}
 
-		// ── Resource access (Supabase JWT auth) ──────────────────────
+		// GET /resources/:slug  — JWT auth, checks access, returns signed URL
 		const resourceMatch = url.pathname.match(/^\/resources\/([^/]+)$/);
 		if (resourceMatch && resourceMatch[1] !== 'download' && request.method === 'GET') {
 			const result = await handleResourceGet(request, resourceMatch[1], env);
@@ -1312,9 +1319,10 @@ export default {
 				return json(result.data || { error: result.error }, result.code, cors);
 			}
 
-			// ── Resource grant (admin only) ──────────────────────────
-			if (url.pathname === '/resources/grant' && request.method === 'POST') {
-				const result = await handleResourceGrant(request, env);
+			// ── Resource grant (admin: grant any email any resource) ─
+			if (url.pathname === '/admin/resources/grant' && request.method === 'POST') {
+				const adminData = await validateApiKey(request.headers.get('X-API-Key') || '', env);
+				const result = await handleResourceGrant(request, env, adminData?.email || 'admin');
 				return json(result.data, result.code, cors);
 			}
 
@@ -1876,10 +1884,11 @@ async function handleAdminDeleteProduct(env, slug) {
 // Resources map: slug -> R2 key + display name
 const RESOURCES = {
 	'ep3': {
-		r2Key:    'lead-magnets/ep3-ai-tech-stack-blueprint.pdf',
-		name:     'AI Tech Stack Blueprint',
-		filename: 'ep3-ai-tech-stack-blueprint.pdf',
-		mimeType: 'application/pdf',
+		r2Key:          'lead-magnets/ep3-ai-tech-stack-blueprint.pdf',
+		name:           'AI Tech Stack Blueprint',
+		filename:       'ep3-ai-tech-stack-blueprint.pdf',
+		mimeType:       'application/pdf',
+		leadMagnetTag:  'ep3_ai_tech_stack',
 	},
 };
 
@@ -1941,67 +1950,135 @@ async function hasResourceAccess(supabaseUid, email, resource, env) {
 	return false;
 }
 
-// Write resource grant to KV + Supabase profiles
-async function grantResourceAccess(email, resource, env) {
+// Write resource grant to KV + Supabase profiles.
+// supabaseUid is optional but enables UPSERT (creates profile row if absent).
+async function grantResourceAccess(email, resource, env, supabaseUid = null) {
 	const lowerEmail = email.toLowerCase();
+	const meta = RESOURCES[resource];
 	const errors = [];
 
-	// KV update
+	// KV update — write resources + leadMagnets arrays onto the user record
 	if (env.USERS) {
 		try {
 			const user = await env.USERS.get(`user:${lowerEmail}`, 'json');
 			if (user) {
-				const resources = Array.from(new Set([...(user.resources || []), resource]));
-				await env.USERS.put(`user:${lowerEmail}`, JSON.stringify({ ...user, resources }));
+				const resources    = Array.from(new Set([...(user.resources    || []), resource]));
+				const leadMagnets  = meta?.leadMagnetTag
+					? Array.from(new Set([...(user.leadMagnets || []), meta.leadMagnetTag]))
+					: (user.leadMagnets || []);
+				await env.USERS.put(`user:${lowerEmail}`, JSON.stringify({ ...user, resources, leadMagnets }));
 			}
 		} catch (e) { errors.push(`kv: ${e.message}`); }
 	}
 
-	// Supabase update (append to resources_granted jsonb array)
+	// Supabase profiles upsert — captures email + tags lead_magnet + appends resources_granted
 	if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
 		try {
-			// Fetch existing row first so we can merge
+			// Read existing row to merge resources_granted without overwriting other values
 			const getRes = await fetch(
-				`${env.SUPABASE_URL}/rest/v1/profiles?select=resources_granted&email=eq.${encodeURIComponent(lowerEmail)}&limit=1`,
+				`${env.SUPABASE_URL}/rest/v1/profiles?select=id,resources_granted&email=eq.${encodeURIComponent(lowerEmail)}&limit=1`,
 				{ headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
 			);
 			const rows = getRes.ok ? await getRes.json() : [];
 			const existing = rows[0]?.resources_granted || [];
-			const merged = Array.from(new Set([...existing, resource]));
+			const merged   = Array.from(new Set([...existing, resource]));
+			const profileId = supabaseUid || rows[0]?.id;
 
-			const patchRes = await fetch(
-				`${env.SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(lowerEmail)}`,
-				{
-					method: 'PATCH',
-					headers: {
-						apikey: env.SUPABASE_SERVICE_KEY,
-						Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-						'Content-Type': 'application/json',
-						Prefer: 'return=minimal',
-					},
-					body: JSON.stringify({ resources_granted: merged }),
-				}
-			);
-			if (!patchRes.ok) errors.push(`supabase: ${patchRes.status}`);
+			// UPSERT when we have the profile id; PATCH by email when we don't
+			if (profileId) {
+				const upsertRes = await fetch(
+					`${env.SUPABASE_URL}/rest/v1/profiles`,
+					{
+						method: 'POST',
+						headers: {
+							apikey: env.SUPABASE_SERVICE_KEY,
+							Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+							'Content-Type': 'application/json',
+							Prefer: 'resolution=merge-duplicates,return=minimal',
+						},
+						body: JSON.stringify({
+							id:                profileId,
+							email:             lowerEmail,
+							resources_granted: merged,
+							lead_magnet:       meta?.leadMagnetTag || null,
+						}),
+					}
+				);
+				if (!upsertRes.ok) errors.push(`supabase-upsert: ${upsertRes.status}`);
+			} else {
+				// No uid yet — PATCH by email (profile must already exist)
+				const patchRes = await fetch(
+					`${env.SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(lowerEmail)}`,
+					{
+						method: 'PATCH',
+						headers: {
+							apikey: env.SUPABASE_SERVICE_KEY,
+							Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+							'Content-Type': 'application/json',
+							Prefer: 'return=minimal',
+						},
+						body: JSON.stringify({ resources_granted: merged, lead_magnet: meta?.leadMagnetTag || null }),
+					}
+				);
+				if (!patchRes.ok) errors.push(`supabase-patch: ${patchRes.status}`);
+			}
 		} catch (e) { errors.push(`supabase: ${e.message}`); }
 	}
 
 	return errors;
 }
 
-// POST /resources/grant  (admin only)
-async function handleResourceGrant(request, env) {
-	let body;
-	try { body = await request.json(); } catch { return { data: { error: 'Invalid JSON' }, code: 400 }; }
+// POST /resources/grant
+// Self-service (JWT): user claims access to a resource after signing up.
+//   Authorization: Bearer <supabase_jwt>   +   body: { resource: 'ep3' }
+// Admin override: admin API key   +   body: { email: '...', resource: 'ep3' }
+async function handleResourceGrant(request, env, adminEmail = null) {
+	let body = {};
+	try {
+		const text = await request.text();
+		if (text) body = JSON.parse(text);
+	} catch { return { data: { error: 'Invalid JSON' }, code: 400 }; }
 
-	const { email, resource } = body;
-	if (!email || !resource) return { data: { error: 'email and resource are required' }, code: 400 };
+	const resource = body.resource || 'ep3'; // default to ep3 (the only resource right now)
 	if (!RESOURCES[resource]) return { data: { error: `Unknown resource: ${resource}` }, code: 400 };
 
-	const errors = await grantResourceAccess(email, resource, env);
-	if (errors.length) return { data: { ok: false, errors }, code: 500 };
+	let email, supabaseUid;
 
-	return { data: { ok: true, email, resource }, code: 200 };
+	if (adminEmail) {
+		// Admin path: email supplied in body
+		if (!body.email) return { data: { error: 'email required for admin grant' }, code: 400 };
+		email = body.email;
+		supabaseUid = null;
+	} else {
+		// Self-service path: resolve from JWT
+		const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+		const auth = await resolveJWTAuth(token, env);
+		if (!auth) return { data: { error: 'Not authenticated' }, code: 401 };
+		email       = auth.email;
+		supabaseUid = auth.supabaseUid || null;
+	}
+
+	const errors = await grantResourceAccess(email, resource, env, supabaseUid);
+	// Non-fatal errors (Supabase unreachable) don't block the response — access is in KV
+	const hadErrors = errors.length > 0;
+
+	// Return a signed download URL immediately so the client can fetch the resource in one call
+	const expiry = Math.floor(Date.now() / 1000) + RESOURCE_URL_TTL;
+	const sig = await signResourceUrl(resource, expiry, env);
+	const base = new URL(request.url).origin;
+	const downloadUrl = `${base}/resources/download?r=${encodeURIComponent(resource)}&exp=${expiry}&sig=${sig}`;
+
+	return {
+		data: {
+			ok:          true,
+			email,
+			resource,
+			downloadUrl,
+			expiresAt:   new Date(expiry * 1000).toISOString(),
+			...(hadErrors ? { warnings: errors } : {}),
+		},
+		code: 200,
+	};
 }
 
 // GET /resources/:resource  (Supabase JWT auth)
