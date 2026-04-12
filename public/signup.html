@@ -3,70 +3,441 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Eternium API — Get Your Key</title>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<title>Eternium API -- Get Your Key</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #050505; --surface: #0a0a0a; --border: rgba(255,255,255,0.1); --text: #e8e8e8; --muted: #7a8ba0; --accent: #18b5f0; --accent2: #0d52bc; --green: #22c55e; --red: #ef4444; --code-bg: #080c10; }
+  :root {
+    --obsidian: #050505;
+    --onyx: #0a0a0a;
+    --surface: #111116;
+    --cyan: #06b6d4;
+    --cyan-dim: rgba(6,182,212,0.12);
+    --cyan-mid: rgba(6,182,212,0.30);
+    --cyan-glow: rgba(6,182,212,0.25);
+    --gold: #C9A14A;
+    --gold-dim: rgba(201,161,74,0.18);
+    --gold-border: rgba(201,161,74,0.45);
+    --text: #e5e5e5;
+    --muted: rgba(229,229,229,0.45);
+    --muted2: rgba(229,229,229,0.25);
+    --green: #10b981;
+    --green-glow: rgba(16,185,129,0.3);
+    --red: #ef4444;
+    --elastic: cubic-bezier(0.16, 1, 0.3, 1);
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Montserrat', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-  .container { max-width: 480px; width: 100%; padding: 2rem; }
 
-  h1 { font-size: 1.8rem; font-weight: 800; text-align: center; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; }
-  .brand-mark { display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 1.5rem; }
-  .brand-mark img { height: 28px; }
-  .subtitle { text-align: center; color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--obsidian);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow-x: hidden;
+  }
 
-  /* Steps */
-  .steps { display: flex; justify-content: center; gap: 0.5rem; margin-bottom: 2rem; }
-  .step-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
-  .step-dot.active { background: var(--accent); }
-  .step-dot.done { background: var(--green); }
+  /* ── Animated gradient mesh background ── */
+  .bg-mesh {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .bg-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.18;
+  }
+  .bg-blob-1 {
+    width: 600px; height: 600px;
+    top: -150px; left: -150px;
+    background: radial-gradient(circle, #06b6d4, transparent 70%);
+    animation: drift1 11s ease-in-out infinite alternate;
+  }
+  .bg-blob-2 {
+    width: 500px; height: 500px;
+    bottom: -100px; right: -100px;
+    background: radial-gradient(circle, #C9A14A, transparent 70%);
+    opacity: 0.14;
+    animation: drift2 14s ease-in-out infinite alternate;
+  }
+  .bg-blob-3 {
+    width: 400px; height: 400px;
+    top: 40%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, #0891b2, transparent 70%);
+    opacity: 0.10;
+    animation: drift3 9s ease-in-out infinite alternate;
+  }
+  @keyframes drift1 { from { transform: translate(0,0); } to { transform: translate(60px, 40px); } }
+  @keyframes drift2 { from { transform: translate(0,0); } to { transform: translate(-50px, -30px); } }
+  @keyframes drift3 { from { transform: translate(-50%,-50%) scale(1); } to { transform: translate(-50%,-50%) scale(1.15); } }
 
-  /* Forms */
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; }
-  label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.3rem; font-weight: 600; }
-  input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.75rem 1rem; border-radius: 8px; font-size: 1rem; margin-bottom: 1rem; outline: none; }
-  input:focus { border-color: var(--accent); }
-  .btn { width: 100%; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border: none; padding: 0.85rem; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; }
-  .btn:hover { opacity: 0.9; }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .error { color: var(--red); font-size: 0.85rem; margin-bottom: 1rem; text-align: center; }
-  .link { text-align: center; margin-top: 1rem; font-size: 0.85rem; color: var(--muted); }
-  .link a { color: var(--accent); text-decoration: none; } .link a:hover { text-decoration: underline; }
+  /* ── Inline SVG glass filter ── */
+  .svg-filters { position: absolute; width: 0; height: 0; overflow: hidden; }
 
-  /* Tier selection */
-  .tier-grid { display: grid; gap: 0.75rem; margin-bottom: 1.5rem; }
-  .tier-option { background: var(--bg); border: 2px solid var(--border); border-radius: 10px; padding: 1rem; cursor: pointer; transition: border-color 0.2s; }
-  .tier-option:hover { border-color: var(--accent); }
-  .tier-option.selected { border-color: var(--accent); background: rgba(108, 99, 255, 0.05); }
-  .tier-option .name { font-weight: 700; font-size: 1rem; }
-  .tier-option .price { color: var(--accent2); font-weight: 600; font-size: 0.9rem; }
-  .tier-option .detail { color: var(--muted); font-size: 0.8rem; margin-top: 0.25rem; }
+  /* ── Layout ── */
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 460px;
+    width: 100%;
+    padding: 2rem 1.5rem;
+  }
+
+  /* ── Brand mark ── */
+  .brand-mark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+  }
+  .brand-mark img {
+    height: 32px;
+    filter: brightness(0) saturate(100%) invert(72%) sepia(58%) saturate(616%) hue-rotate(5deg) brightness(92%) contrast(90%);
+  }
+
+  h1 {
+    font-size: 1.85rem;
+    font-weight: 700;
+    text-align: center;
+    color: var(--text);
+    letter-spacing: -0.03em;
+    margin-bottom: 0.4rem;
+  }
+  h1 span { color: var(--cyan); }
+
+  .subtitle {
+    text-align: center;
+    color: var(--muted);
+    margin-bottom: 1.75rem;
+    font-size: 0.9rem;
+    font-weight: 400;
+  }
+
+  /* ── Step indicators ── */
+  .steps {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 1.5rem;
+  }
+  .step-pill {
+    height: 6px;
+    width: 24px;
+    border-radius: 9999px;
+    background: rgba(255,255,255,0.1);
+    transition: all 500ms var(--elastic);
+  }
+  .step-pill.active {
+    width: 36px;
+    background: var(--cyan);
+    box-shadow: 0 0 10px var(--cyan-glow);
+  }
+  .step-pill.done {
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green-glow);
+  }
+
+  /* ── Glass card ── */
+  .card {
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    background: rgba(10, 10, 10, 0.60);
+    border: 1px solid var(--cyan-dim);
+    border-radius: 20px;
+    padding: 1.75rem;
+    box-shadow:
+      0 8px 32px rgba(0,0,0,0.5),
+      inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 -1px 0 rgba(0,0,0,0.3);
+    position: relative;
+    overflow: hidden;
+  }
+  /* Specular highlight shimmer on top edge */
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: -60%;
+    width: 50%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
+    animation: shimmer 3s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes shimmer {
+    0% { left: -60%; }
+    100% { left: 140%; }
+  }
+
+  /* ── Labels ── */
+  label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* ── Glass inputs ── */
+  input[type="email"],
+  input[type="password"],
+  input[type="text"] {
+    width: 100%;
+    background: rgba(26, 26, 26, 0.5);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: var(--text);
+    padding: 0.7rem 1rem;
+    border-radius: 12px;
+    font-size: 0.9375rem;
+    font-family: 'Inter', sans-serif;
+    margin-bottom: 1rem;
+    outline: none;
+    transition: border-color 300ms var(--elastic), box-shadow 300ms var(--elastic);
+  }
+  input[type="email"]::placeholder,
+  input[type="password"]::placeholder,
+  input[type="text"]::placeholder { color: rgba(255,255,255,0.25); }
+  input[type="email"]:focus,
+  input[type="password"]:focus,
+  input[type="text"]:focus {
+    border-color: rgba(6,182,212,0.4);
+    box-shadow: 0 0 0 3px rgba(6,182,212,0.08), 0 0 16px rgba(6,182,212,0.1);
+  }
+
+  /* ── Primary glass button ── */
+  .btn {
+    width: 100%;
+    background: linear-gradient(135deg, #06b6d4, #0891b2);
+    color: #fff;
+    border: none;
+    padding: 0.85rem;
+    border-radius: 14px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    box-shadow: 0 0 24px rgba(6,182,212,0.3), inset 0 1px 0 rgba(255,255,255,0.15);
+    transition: transform 200ms var(--elastic), box-shadow 200ms var(--elastic), opacity 150ms ease;
+    letter-spacing: 0.01em;
+  }
+  .btn:hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 36px rgba(6,182,212,0.45), inset 0 1px 0 rgba(255,255,255,0.15);
+  }
+  .btn:active { transform: scale(0.99); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+
+  /* ── Outline button ── */
+  .btn-outline {
+    width: 100%;
+    background: rgba(6,182,212,0.06);
+    border: 1px solid var(--cyan-mid);
+    color: var(--cyan);
+    padding: 0.75rem;
+    border-radius: 14px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    transition: background 200ms ease, box-shadow 200ms ease, transform 200ms var(--elastic);
+  }
+  .btn-outline:hover {
+    background: rgba(6,182,212,0.12);
+    box-shadow: 0 0 16px rgba(6,182,212,0.15);
+    transform: scale(1.01);
+  }
+
+  /* ── Error ── */
+  .error {
+    color: #f87171;
+    font-size: 0.82rem;
+    margin-bottom: 0.75rem;
+    text-align: center;
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.18);
+    border-radius: 10px;
+    padding: 0.5rem 0.75rem;
+  }
+
+  /* ── Link helper ── */
+  .link {
+    text-align: center;
+    margin-top: 1rem;
+    font-size: 0.84rem;
+    color: var(--muted);
+  }
+  .link a { color: var(--cyan); text-decoration: none; }
+  .link a:hover { text-decoration: underline; }
+
+  /* ── Tier selection ── */
+  .tier-grid { display: grid; gap: 0.6rem; margin-bottom: 1.25rem; }
+
+  .tier-option {
+    background: rgba(17,17,22,0.6);
+    border: 1.5px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 0.9rem 1rem;
+    cursor: pointer;
+    transition: border-color 300ms var(--elastic), background 300ms ease, box-shadow 300ms ease;
+    position: relative;
+  }
+  .tier-option:hover {
+    border-color: var(--cyan-mid);
+    background: rgba(6,182,212,0.04);
+  }
+  .tier-option.selected {
+    border-color: var(--gold-border);
+    background: var(--gold-dim);
+    box-shadow: 0 0 18px rgba(201,161,74,0.12);
+  }
+  .tier-option .name { font-weight: 700; font-size: 0.95rem; }
   .tier-option.free-tier .price { color: var(--green); }
-  .popular { position: relative; }
-  .popular::after { content: 'POPULAR'; position: absolute; top: -8px; right: 12px; background: var(--accent); color: #fff; font-size: 0.6rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+  .tier-option .price { color: var(--cyan); font-weight: 600; font-size: 0.875rem; }
+  .tier-option .detail { color: var(--muted); font-size: 0.78rem; margin-top: 0.2rem; }
 
-  /* Success */
+  /* POPULAR badge */
+  .popular-badge {
+    position: absolute;
+    top: -9px;
+    right: 12px;
+    background: linear-gradient(135deg, #C9A14A, #B8860B);
+    color: #0a0a0a;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    letter-spacing: 0.08em;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 8px rgba(201,161,74,0.3);
+  }
+
+  /* ── Success / API key ── */
   .success-card { text-align: center; }
-  .success-card .key-display { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: var(--green); margin: 1rem 0; word-break: break-all; position: relative; cursor: pointer; }
-  .success-card .key-display:hover::after { content: 'Click to copy'; position: absolute; top: -24px; right: 0; font-size: 0.7rem; color: var(--muted); }
-  .success-card .warning { color: var(--muted); font-size: 0.8rem; margin: 0.5rem 0 1.5rem; }
-  .btn-group { display: flex; gap: 0.5rem; }
-  .btn-outline { width: 100%; background: transparent; border: 1px solid var(--accent); color: var(--accent); padding: 0.75rem; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
-  .btn-outline:hover { background: rgba(108, 99, 255, 0.1); }
 
-  footer { text-align: center; margin-top: 2rem; color: var(--muted); font-size: 0.75rem; }
+  .key-display {
+    background: rgba(5,5,5,0.7);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 1rem 1.25rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.92rem;
+    color: var(--green);
+    margin: 1rem 0 0.5rem;
+    word-break: break-all;
+    cursor: pointer;
+    transition: border-color 300ms ease, box-shadow 300ms ease;
+    position: relative;
+    text-align: left;
+    letter-spacing: 0.02em;
+  }
+  .key-display:hover {
+    border-color: rgba(16,185,129,0.35);
+    box-shadow: 0 0 12px rgba(16,185,129,0.15);
+  }
+  .key-display.copied {
+    border-color: var(--green);
+    box-shadow: 0 0 20px var(--green-glow);
+  }
+  .key-copy-hint {
+    font-size: 0.72rem;
+    color: var(--muted2);
+    text-align: right;
+    margin-bottom: 0.5rem;
+    font-family: 'Inter', sans-serif;
+  }
+
+  .warning {
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin: 0.25rem 0 1.5rem;
+    line-height: 1.5;
+  }
+
+  .btn-group { display: flex; gap: 0.5rem; }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center;
+    margin-top: 1.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: var(--muted2);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  footer a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--muted2);
+    text-decoration: none;
+    transition: color 200ms ease;
+  }
+  footer a:hover { color: var(--gold); }
+  footer img {
+    height: 14px;
+    width: 14px;
+    filter: brightness(0) saturate(100%) invert(72%) sepia(58%) saturate(616%) hue-rotate(5deg) brightness(92%) contrast(90%);
+  }
+
+  /* ── Mobile responsive ── */
+  @media (max-width: 480px) {
+    .container { padding: 1.25rem 1rem; }
+    .card { padding: 1.25rem; border-radius: 16px; }
+    h1 { font-size: 1.5rem; }
+    .btn-group { flex-direction: column; }
+  }
 </style>
 </head>
 <body>
+
+<!-- SVG glass filter (inline, hidden) -->
+<svg class="svg-filters" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="glass-filter" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" seed="2" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="4" xChannelSelector="R" yChannelSelector="G" result="displaced"/>
+      <feGaussianBlur in="displaced" stdDeviation="0.4" result="blurred"/>
+      <feSpecularLighting in="blurred" surfaceScale="3" specularConstant="0.6" specularExponent="20" result="specular">
+        <fePointLight x="50%" y="-20%" z="200"/>
+      </feSpecularLighting>
+      <feComposite in="specular" in2="SourceAlpha" operator="in" result="specular-masked"/>
+      <feBlend in="blurred" in2="specular-masked" mode="screen"/>
+    </filter>
+  </defs>
+</svg>
+
+<!-- Animated background -->
+<div class="bg-mesh">
+  <div class="bg-blob bg-blob-1"></div>
+  <div class="bg-blob bg-blob-2"></div>
+  <div class="bg-blob bg-blob-3"></div>
+</div>
+
 <div class="container">
 
   <!-- Step 1: Create Account -->
   <div id="step-1">
     <div class="brand-mark"><img src="/assets/eternium-icon.png" alt="Eternium"></div>
-    <h1>Eternium API</h1>
+    <h1>Eternium <span>API</span></h1>
     <p class="subtitle">AI generation built for agents. Get your key in 60 seconds.</p>
-    <div class="steps"><span class="step-dot active"></span><span class="step-dot"></span><span class="step-dot"></span></div>
+    <div class="steps">
+      <span class="step-pill active"></span>
+      <span class="step-pill"></span>
+      <span class="step-pill"></span>
+    </div>
     <div class="card">
       <div id="signup-error" class="error" style="display:none;"></div>
       <label>Email</label>
@@ -82,7 +453,8 @@
 
   <!-- Step 1b: Login -->
   <div id="step-login" style="display:none;">
-    <h1>Welcome Back</h1>
+    <div class="brand-mark"><img src="/assets/eternium-icon.png" alt="Eternium"></div>
+    <h1>Welcome <span>Back</span></h1>
     <p class="subtitle">Sign in to manage your API key.</p>
     <div class="card">
       <div id="login-error" class="error" style="display:none;"></div>
@@ -97,9 +469,14 @@
 
   <!-- Step 2: Choose Tier -->
   <div id="step-2" style="display:none;">
-    <h1>Choose Your Plan</h1>
+    <div class="brand-mark"><img src="/assets/eternium-icon.png" alt="Eternium"></div>
+    <h1>Choose Your <span>Plan</span></h1>
     <p class="subtitle">Start free. Upgrade anytime.</p>
-    <div class="steps"><span class="step-dot done"></span><span class="step-dot active"></span><span class="step-dot"></span></div>
+    <div class="steps">
+      <span class="step-pill done"></span>
+      <span class="step-pill active"></span>
+      <span class="step-pill"></span>
+    </div>
     <div class="card">
       <div id="tier-error" class="error" style="display:none;"></div>
       <div class="tier-grid">
@@ -113,19 +490,20 @@
           <div style="display:flex;justify-content:space-between;align-items:baseline;">
             <span class="name">Starter</span><span class="price">$29/mo</span>
           </div>
-          <div class="detail">4,400 credits &middot; 30 req/min &middot; Hobbyists & builders</div>
+          <div class="detail">4,400 credits &middot; 30 req/min &middot; Hobbyists &amp; builders</div>
         </div>
-        <div class="tier-option popular" data-tier="builder" onclick="selectTier(this)">
+        <div class="tier-option" data-tier="builder" onclick="selectTier(this)" style="position:relative;">
+          <span class="popular-badge">POPULAR</span>
           <div style="display:flex;justify-content:space-between;align-items:baseline;">
             <span class="name">Builder</span><span class="price">$79/mo</span>
           </div>
-          <div class="detail">12,400 credits &middot; 45 req/min &middot; Indie devs & small agents</div>
+          <div class="detail">12,400 credits &middot; 45 req/min &middot; Indie devs &amp; small agents</div>
         </div>
         <div class="tier-option" data-tier="scale" onclick="selectTier(this)">
           <div style="display:flex;justify-content:space-between;align-items:baseline;">
             <span class="name">Scale</span><span class="price">$199/mo</span>
           </div>
-          <div class="detail">33,000 credits &middot; 60 req/min &middot; Teams & production</div>
+          <div class="detail">33,000 credits &middot; 60 req/min &middot; Teams &amp; production</div>
         </div>
       </div>
       <button class="btn" onclick="chooseTier()">Continue</button>
@@ -134,12 +512,18 @@
 
   <!-- Step 3: Success -->
   <div id="step-3" style="display:none;">
-    <h1>You're In</h1>
-    <p class="subtitle">Your API key is ready. Keep it safe — it won't be shown again.</p>
-    <div class="steps"><span class="step-dot done"></span><span class="step-dot done"></span><span class="step-dot active"></span></div>
+    <div class="brand-mark"><img src="/assets/eternium-icon.png" alt="Eternium"></div>
+    <h1>You're <span>In</span></h1>
+    <p class="subtitle">Your API key is ready. Keep it safe -- it won't be shown again.</p>
+    <div class="steps">
+      <span class="step-pill done"></span>
+      <span class="step-pill done"></span>
+      <span class="step-pill active"></span>
+    </div>
     <div class="card success-card">
-      <div class="key-display" id="api-key-display" onclick="copyKey()">—</div>
-      <div class="warning">Save this key now. You can regenerate it later, but the current key will be invalidated.</div>
+      <p class="key-copy-hint">Click to copy</p>
+      <div class="key-display" id="api-key-display" onclick="copyKey()">--</div>
+      <p class="warning">Save this key now. You can regenerate it later, but the current key will be invalidated.</p>
       <div class="btn-group">
         <a class="btn" href="/docs" style="text-align:center;text-decoration:none;">Read Docs</a>
         <a class="btn-outline" href="/dashboard" style="text-align:center;text-decoration:none;">Dashboard</a>
@@ -147,7 +531,14 @@
     </div>
   </div>
 
-  <footer>&copy; 2026 Eternium LLC</footer>
+  <footer>
+    <span>&copy; 2026 Eternium LLC &middot;</span>
+    <a href="https://eternium.ai" target="_blank" rel="noopener noreferrer">
+      Powered by
+      <img src="/assets/eternium-icon.png" alt="Eternium AI">
+      Eternium AI
+    </a>
+  </footer>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -237,7 +628,7 @@ async function signup() {
     });
     if (error) throw error;
     if (!data.session) {
-      // Email confirmation required — direct to login with helpful message
+      // Email confirmation required -- direct to login with helpful message
       showError('signup-error', '');
       showStep('login');
       showError('login-error', 'Account created. Check your email to confirm it, then sign in here.');
@@ -312,7 +703,7 @@ async function chooseTier() {
     }
   }
 
-  // Free tier — generate key immediately
+  // Free tier -- generate key immediately
   btn.textContent = 'Generating key...';
   try {
     const res = await fetch(`${BASE}/auth/provision-key`, {
@@ -338,8 +729,8 @@ async function chooseTier() {
 function copyKey() {
   navigator.clipboard.writeText(generatedKey).then(() => {
     const el = document.getElementById('api-key-display');
-    el.style.borderColor = 'var(--green)';
-    setTimeout(() => el.style.borderColor = 'var(--border)', 1500);
+    el.classList.add('copied');
+    setTimeout(() => el.classList.remove('copied'), 1500);
   });
 }
 
