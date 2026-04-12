@@ -155,7 +155,7 @@ const BASE = window.location.origin;
 const SUPABASE_URL = 'https://wmahfjguvqvefgjpbcdc.supabase.co';
 // TODO: Replace with real anon key from Supabase dashboard (Project Settings > API)
 const SUPABASE_ANON_KEY = 'sb_publishable_ZgilUeGnprKSwOAUGHiyYg_apkYouNQ';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let sessionToken = '';
 let selectedTier = 'free';
@@ -191,7 +191,7 @@ async function signup() {
   btn.textContent = 'Creating...';
 
   try {
-    const { data, error } = await supabase.auth.signUp({
+    const { data, error } = await sb.auth.signUp({
       email,
       password,
       options: { data: { name: name || email.split('@')[0] } },
@@ -220,7 +220,7 @@ async function login() {
   btn.textContent = 'Signing in...';
 
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
     if (error) throw error;
     sessionToken = data.session.access_token;
     // Check if user already has an API key via provision-key (will 409 if exists)
