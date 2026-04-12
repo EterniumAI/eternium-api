@@ -139,7 +139,30 @@ async function verifyJwtRS256(token, issuer) {
 	} catch { return null; }
 }
 
-// Resolve JWT auth — accepts Supabase HS256 (SUPABASE_JWT_SECRET) and RS256 (JWKS).
+// Supabase API fallback — verifies the token by calling /auth/v1/user.
+// Used when SUPABASE_JWT_SECRET is stale/absent and RS256 JWKS fails.
+// Costs one network round-trip; result is NOT cached (tokens expire, can be revoked).
+async function verifyViaSupabaseApi(token, env) {
+	const baseUrl = env.SUPABASE_URL;
+	const apiKey  = env.SUPABASE_SERVICE_KEY;
+	if (!baseUrl || !apiKey || !token) return null;
+	try {
+		const res = await fetch(`${baseUrl}/auth/v1/user`, {
+			headers: {
+				'Authorization': `Bearer ${token}`,
+				'apikey': apiKey,
+			},
+		});
+		if (!res.ok) return null;
+		const user = await res.json();
+		// Must have email + id to be usable
+		if (!user?.email || !user?.id) return null;
+		return { email: user.email, source: 'supabase', supabaseUid: user.id };
+	} catch { return null; }
+}
+
+// Resolve JWT auth — accepts Supabase HS256 (SUPABASE_JWT_SECRET), RS256 (JWKS),
+// and falls back to Supabase /auth/v1/user API call if both crypto paths fail.
 // Returns { email, source: 'supabase', supabaseUid } or null.
 export async function resolveJWTAuth(token, env) {
 	if (!token) return null;
@@ -156,6 +179,10 @@ export async function resolveJWTAuth(token, env) {
 	// RS256 path via JWKS (network, cached 1 hour)
 	const rs256Payload = await verifyJwtRS256(token, issuer);
 	if (rs256Payload) return { email: rs256Payload.email, source: 'supabase', supabaseUid: rs256Payload.sub };
+
+	// Fallback: delegate verification to Supabase API (handles rotated secrets, opaque tokens)
+	const apiUser = await verifyViaSupabaseApi(token, env);
+	if (apiUser) return apiUser;
 
 	return null;
 }
@@ -370,20 +397,25 @@ export async function handleProvisionKey(request, env) {
 	const auth = await resolveJWTAuth(token, env);
 	if (!auth) return { error: 'Not authenticated', code: 401 };
 
-	let body;
-	try { body = await request.json(); }
-	catch { return { error: 'Invalid body', code: 400 }; }
+	// Body is optional (tier defaults to 'free')
+	let body = {};
+	try {
+		const text = await request.text();
+		if (text) body = JSON.parse(text);
+	} catch { /* ignore malformed body, use defaults */ }
 
 	let user = await ensureSupabaseUser(auth.email, auth.supabaseUid, env);
 	if (!user) return { error: 'User not found', code: 404 };
 
-	// Don't allow re-provisioning if key exists (they should use regenerate)
+	const isAdmin = user.email.toLowerCase() === (env.ADMIN_EMAIL || 'ty@eternium.ai').toLowerCase();
+
+	// If user already has a key, return it (idempotent — callers can detect via existing: true)
 	if (user.apiKey) {
-		return { error: 'API key already exists. Use POST /auth/regenerate-key to rotate it.', code: 409 };
+		return { data: { api_key: user.apiKey, tier: user.tier, existing: true }, code: 200 };
 	}
 
-	const isAdmin = user.email.toLowerCase() === (env.ADMIN_EMAIL || 'ty@eternium.ai').toLowerCase();
-	const tier = isAdmin ? (body.tier || user.tier || 'free') : (user.tier || 'free');
+	// Admin can pick any tier; everyone else defaults to 'free' (Stripe webhook upgrades tier)
+	const tier = isAdmin ? (body.tier || user.tier || 'internal') : (user.tier || 'free');
 	const apiKey = await provisionKey(env, user.email, tier, user.name);
 
 	user.apiKey = apiKey;
