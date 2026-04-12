@@ -643,7 +643,7 @@
   <div id="auth-screen">
     <div class="auth-box">
       <div class="brand-mark">
-        <img src="/assets/eternium-icon.png" alt="Eternium">
+        <img src="/assets/eternium-white.png" style="height:28px;width:auto;object-fit:contain;" alt="Eternium">
       </div>
       <h1>Eternium <span>API</span></h1>
       <p>Enter your API key to view usage and manage your account.</p>
@@ -670,7 +670,7 @@
   <div id="nav-bar" style="display:none;" class="nav-pill">
     <div class="nav-inner">
       <div class="nav-brand">
-        <img src="/assets/eternium-icon.png" alt="Eternium">
+        <img src="/assets/eternium-white.png" style="height:28px;width:auto;object-fit:contain;" alt="Eternium">
         Eternium <span>API</span>
       </div>
       <div class="nav-right">
@@ -829,7 +829,7 @@ for r in pack["results"]:
         </div>
         <a href="https://eternium.ai" target="_blank" rel="noopener noreferrer" class="footer-powered">
           Powered by
-          <img src="/assets/eternium-icon.png" alt="Eternium AI">
+          <img src="/assets/eternium-white.png" style="height:28px;width:auto;object-fit:contain;" alt="Eternium AI">
           Eternium AI
         </a>
         <span>&copy; 2026 Eternium LLC</span>
@@ -865,6 +865,7 @@ const TIERS = {
   internal:   { credits: '2,000,000', rate: '200', concurrent: '100' },
 };
 
+const ADMIN_EMAIL = 'ty@eternium.ai';
 let currentKey = '';
 let keyVisible = false;
 
@@ -892,6 +893,11 @@ function authenticate() {
     })
     .then(data => {
       localStorage.setItem('etrn_key', key);
+      // Admin users get redirected to the admin dashboard
+      if (data.email && data.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+        window.location.href = '/admin/dashboard';
+        return;
+      }
       showDashboard(data);
     })
     .catch(err => {
