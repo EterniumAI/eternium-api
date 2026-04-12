@@ -635,6 +635,11 @@ async function signup() {
       return;
     }
     sessionToken = data.session.access_token;
+    // Resource flow: grant resource and redirect before API key step
+    if (RESOURCE_PARAM) {
+      const redirected = await handleResourceRedirect(sessionToken);
+      if (redirected) return;
+    }
     // Admin and first-time users: attempt key provisioning directly (skip tier if key exists)
     const handled = await handleExistingSession(email).catch(() => false);
     if (!handled) showStep('2');
@@ -661,6 +666,11 @@ async function login() {
     const { data, error } = await sb.auth.signInWithPassword({ email, password });
     if (error) throw error;
     sessionToken = data.session.access_token;
+    // Resource flow: grant resource and redirect before API key step
+    if (RESOURCE_PARAM) {
+      const redirected = await handleResourceRedirect(sessionToken);
+      if (redirected) return;
+    }
     // Try to resolve the key; admin always goes straight to step 3
     const handled = await handleExistingSession(email);
     if (!handled) showStep('2');
@@ -734,8 +744,62 @@ function copyKey() {
   });
 }
 
-// Handle Stripe success redirect
+// ── Query param helpers ──────────────────────────────────────────
 const params = new URLSearchParams(window.location.search);
+const RESOURCE_PARAM  = params.get('resource');   // e.g. "ep3"
+const RETURN_TO_PARAM = params.get('return_to');  // e.g. "https://app.eternium.ai/products/tech-stack"
+
+// If a resource param is present, show a tailored header so the user knows
+// why they are being asked to create an account.
+if (RESOURCE_PARAM) {
+  const subtitle = document.querySelector('#step-1 p.subtitle') || document.querySelector('#step-1 p');
+  if (subtitle) {
+    subtitle.textContent = 'Create a free account to access this resource. No credit card required.';
+  }
+  const loginSubtitle = document.querySelector('#step-login p.subtitle') || document.querySelector('#step-login p');
+  if (loginSubtitle) {
+    loginSubtitle.textContent = 'Sign in to access your free resource.';
+  }
+}
+
+// After auth is complete, grant the resource and redirect (or show key for API flow).
+// Returns true if a resource redirect happened (caller should not proceed to tier step).
+async function handleResourceRedirect(jwt) {
+  if (!RESOURCE_PARAM) return false;
+  try {
+    const res = await fetch(`${BASE}/resources/grant`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
+      body: JSON.stringify({ resource: RESOURCE_PARAM }),
+    });
+    const data = await res.json();
+    if (data.downloadUrl) {
+      // Redirect to return_to URL (product page) with a short-lived download URL as param
+      const destination = RETURN_TO_PARAM || data.downloadUrl;
+      // Pass the download URL so the product page can show a direct download button
+      const sep = destination.includes('?') ? '&' : '?';
+      window.location.href = `${destination}${sep}download_url=${encodeURIComponent(data.downloadUrl)}&resource=${encodeURIComponent(RESOURCE_PARAM)}`;
+      return true;
+    }
+  } catch (e) {
+    console.error('Resource grant failed:', e);
+  }
+  // Grant failed — fall through to normal API key step so user still has value
+  return false;
+}
+
+// Wrap handleExistingSession to insert the resource-redirect step.
+const _origHandleExistingSession = handleExistingSession;
+// eslint-disable-next-line no-global-assign
+async function handleExistingSessionWithResource(email) {
+  if (RESOURCE_PARAM && sessionToken) {
+    const redirected = await handleResourceRedirect(sessionToken);
+    if (redirected) return true; // page is navigating away
+  }
+  return _origHandleExistingSession(email);
+}
+
+// ── Handle Stripe success redirect ──────────────────────────────
 if (params.get('checkout') === 'success' && params.get('session_id')) {
   (async () => {
     try {
@@ -751,6 +815,21 @@ if (params.get('checkout') === 'success' && params.get('session_id')) {
     } catch (e) { console.error('Stripe success handler failed:', e); }
   })();
 }
+
+// ── Restore existing Supabase session (handles return_to flow) ───
+// If the user already has a Supabase session (e.g. they clicked a resource link
+// while logged in on the same browser), skip the auth UI entirely.
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session && RESOURCE_PARAM) {
+    sessionToken = session.access_token;
+    const redirected = await handleResourceRedirect(sessionToken);
+    if (!redirected) {
+      // Resource grant failed but user is authed — show their key
+      await handleExistingSession(session.user.email).catch(() => {});
+    }
+  }
+})();
 </script>
 </body>
 </html>
