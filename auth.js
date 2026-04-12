@@ -161,19 +161,30 @@ export async function resolveJWTAuth(token, env) {
 }
 
 // Ensure a KV user record exists for a Supabase-authed user. Returns the user object.
+// Lookup order: uid index (fast) -> email (fallback). Backfills uid index on first Supabase login.
 export async function ensureSupabaseUser(email, supabaseUid, env) {
 	const lowerEmail = email.toLowerCase();
+
+	// Fast path: UID index populated after first Supabase login or migration
+	if (supabaseUid) {
+		const byUid = await getUserByUid(env, supabaseUid);
+		if (byUid) return byUid;
+	}
+
+	// Email fallback
 	let user = await getUser(env, lowerEmail);
 
 	if (user) {
+		// Backfill supabase_uid and UID index on first Supabase login for pre-existing accounts
 		if (!user.supabaseUid && supabaseUid) {
 			user.supabaseUid = supabaseUid;
 			await saveUser(env, user);
+			await saveUserUidIndex(env, supabaseUid, lowerEmail);
 		}
 		return user;
 	}
 
-	// Write user record first (sentinel) to minimize race window
+	// New user: write sentinel first to narrow race window
 	const newUser = {
 		email: lowerEmail,
 		name: lowerEmail.split('@')[0],
@@ -186,6 +197,7 @@ export async function ensureSupabaseUser(email, supabaseUid, env) {
 		active: true,
 	};
 	await saveUser(env, newUser);
+	if (supabaseUid) await saveUserUidIndex(env, supabaseUid, lowerEmail);
 
 	// Re-read to catch concurrent writes (another request may have provisioned first)
 	return await getUser(env, lowerEmail);
@@ -248,6 +260,22 @@ async function getUser(env, email) {
 	if (!env.USERS) return null;
 	try { return await env.USERS.get(`user:${email.toLowerCase()}`, 'json'); }
 	catch { return null; }
+}
+
+// Secondary UID index: uid:<supabaseUid> -> email string.
+// Written on first Supabase login so subsequent lookups skip the email scan.
+async function getUserByUid(env, supabaseUid) {
+	if (!env.USERS || !supabaseUid) return null;
+	try {
+		const email = await env.USERS.get(`uid:${supabaseUid}`);
+		if (!email) return null;
+		return await getUser(env, email);
+	} catch { return null; }
+}
+
+async function saveUserUidIndex(env, supabaseUid, email) {
+	if (!env.USERS || !supabaseUid) return;
+	try { await env.USERS.put(`uid:${supabaseUid}`, email.toLowerCase()); } catch { /* non-fatal */ }
 }
 
 async function saveUser(env, user) {
