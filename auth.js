@@ -61,7 +61,7 @@ function generateApiKey() {
 	return `etrn_${rand}`;
 }
 
-// ── Supabase JWT verification (HS256, base64url) ───────────────
+// ── Supabase JWT verification (HS256 + RS256, base64url) ───────
 function base64UrlDecode(str) {
 	return atob(str.replace(/-/g, '+').replace(/_/g, '/'));
 }
@@ -89,15 +89,73 @@ async function verifySupabaseJWT(token, secret, expectedIssuer) {
 	} catch { return null; }
 }
 
-// Resolve JWT auth — Supabase JWT only.
+// ── JWKS cache for RS256 verification ──────────────────────────
+const _jwksCache = new Map(); // issuer -> { keys, fetchedAt }
+const JWKS_CACHE_MS = 3_600_000; // 1 hour
+
+async function fetchJwks(issuer) {
+	const cached = _jwksCache.get(issuer);
+	if (cached && Date.now() - cached.fetchedAt < JWKS_CACHE_MS) return cached.keys;
+	try {
+		const res = await fetch(`${issuer}/.well-known/jwks.json`);
+		if (!res.ok) return null;
+		const { keys } = await res.json();
+		if (!Array.isArray(keys)) return null;
+		_jwksCache.set(issuer, { keys, fetchedAt: Date.now() });
+		return keys;
+	} catch { return null; }
+}
+
+async function verifyJwtRS256(token, issuer) {
+	try {
+		const parts = token.split('.');
+		if (parts.length !== 3) return null;
+		const [headerB64, bodyB64, sigB64] = parts;
+
+		const header  = JSON.parse(base64UrlDecode(headerB64));
+		const payload = JSON.parse(base64UrlDecode(bodyB64));
+
+		if (header.alg !== 'RS256') return null;
+		if (payload.exp !== undefined && payload.exp !== null && payload.exp < Math.floor(Date.now() / 1000)) return null;
+		if (!payload.email) return null;
+		if (issuer && payload.iss !== issuer) return null;
+
+		const keys = await fetchJwks(issuer);
+		if (!keys || keys.length === 0) return null;
+
+		// Prefer the key matching the token's kid; fall back to first key
+		const jwk = header.kid ? (keys.find(k => k.kid === header.kid) || keys[0]) : keys[0];
+		if (!jwk) return null;
+
+		const cryptoKey = await crypto.subtle.importKey(
+			'jwk', jwk,
+			{ name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+			false, ['verify']
+		);
+		const sigBytes = Uint8Array.from(base64UrlDecode(sigB64), c => c.charCodeAt(0));
+		const data = new TextEncoder().encode(`${headerB64}.${bodyB64}`);
+		const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', cryptoKey, sigBytes, data);
+		return valid ? payload : null;
+	} catch { return null; }
+}
+
+// Resolve JWT auth — accepts Supabase HS256 (SUPABASE_JWT_SECRET) and RS256 (JWKS).
 // Returns { email, source: 'supabase', supabaseUid } or null.
 export async function resolveJWTAuth(token, env) {
-	if (!token || !env.SUPABASE_JWT_SECRET) return null;
+	if (!token) return null;
 
 	const projectRef = env.SUPABASE_PROJECT_REF || 'wmahfjguvqvefgjpbcdc';
 	const issuer = `https://${projectRef}.supabase.co/auth/v1`;
-	const payload = await verifySupabaseJWT(token, env.SUPABASE_JWT_SECRET, issuer);
-	if (payload) return { email: payload.email, source: 'supabase', supabaseUid: payload.sub };
+
+	// HS256 path (requires secret; fast, no network)
+	if (env.SUPABASE_JWT_SECRET) {
+		const payload = await verifySupabaseJWT(token, env.SUPABASE_JWT_SECRET, issuer);
+		if (payload) return { email: payload.email, source: 'supabase', supabaseUid: payload.sub };
+	}
+
+	// RS256 path via JWKS (network, cached 1 hour)
+	const rs256Payload = await verifyJwtRS256(token, issuer);
+	if (rs256Payload) return { email: rs256Payload.email, source: 'supabase', supabaseUid: rs256Payload.sub };
 
 	return null;
 }
