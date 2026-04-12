@@ -101,6 +101,7 @@
     <p class="subtitle">Start free. Upgrade anytime.</p>
     <div class="steps"><span class="step-dot done"></span><span class="step-dot active"></span><span class="step-dot"></span></div>
     <div class="card">
+      <div id="tier-error" class="error" style="display:none;"></div>
       <div class="tier-grid">
         <div class="tier-option free-tier selected" data-tier="free" onclick="selectTier(this)">
           <div style="display:flex;justify-content:space-between;align-items:baseline;">
@@ -153,8 +154,10 @@
 <script>
 const BASE = window.location.origin;
 const SUPABASE_URL = 'https://wmahfjguvqvefgjpbcdc.supabase.co';
-// TODO: Replace with real anon key from Supabase dashboard (Project Settings > API)
+// Anon key: Project Settings > API > Project API keys > anon/public
+// Update this when Supabase rotates keys (Settings > API > Regenerate anon key)
 const SUPABASE_ANON_KEY = 'sb_publishable_ZgilUeGnprKSwOAUGHiyYg_apkYouNQ';
+const ADMIN_EMAIL = 'ty@eternium.ai';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let sessionToken = '';
@@ -177,6 +180,42 @@ function showStep(n) {
 function showLogin() { showStep('login'); }
 function showSignup() { showStep('1'); }
 
+// Called after a session is established (signup or login) to check if key already exists.
+// Returns true if handled (key shown or redirected), false if should continue to tier step.
+async function handleExistingSession(email) {
+  // Admin users skip tier selection and get their key directly
+  const isAdmin = email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+
+  const res = await fetch(`${BASE}/auth/provision-key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+    body: JSON.stringify({ tier: isAdmin ? 'internal' : 'free' }),
+  });
+
+  if (!res.ok) {
+    // 401 = JWT rejected by Worker; surface the error rather than silently going to tier step
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      throw new Error('Session not recognized by the API. Try signing out and back in.');
+    }
+    throw new Error(data.error || `Unexpected error (${res.status})`);
+  }
+
+  const data = await res.json();
+
+  // Key exists or was just created
+  generatedKey = data.api_key;
+  document.getElementById('api-key-display').textContent = generatedKey;
+
+  if (data.existing) {
+    // Show key with "existing key" subtitle
+    document.querySelector('#step-3 p.subtitle').textContent =
+      'Your existing API key. Use /auth/regenerate-key to rotate it.';
+  }
+  showStep('3');
+  return true;
+}
+
 async function signup() {
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
@@ -197,9 +236,17 @@ async function signup() {
       options: { data: { name: name || email.split('@')[0] } },
     });
     if (error) throw error;
-    if (!data.session) throw new Error('Check your email to confirm your account, then sign in.');
+    if (!data.session) {
+      // Email confirmation required — direct to login with helpful message
+      showError('signup-error', '');
+      showStep('login');
+      showError('login-error', 'Account created. Check your email to confirm it, then sign in here.');
+      return;
+    }
     sessionToken = data.session.access_token;
-    showStep('2');
+    // Admin and first-time users: attempt key provisioning directly (skip tier if key exists)
+    const handled = await handleExistingSession(email).catch(() => false);
+    if (!handled) showStep('2');
   } catch (e) {
     showError('signup-error', e.message);
   } finally {
@@ -223,21 +270,11 @@ async function login() {
     const { data, error } = await sb.auth.signInWithPassword({ email, password });
     if (error) throw error;
     sessionToken = data.session.access_token;
-    // Check if user already has an API key via provision-key (will 409 if exists)
-    const res = await fetch(`${BASE}/auth/provision-key`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
-      body: JSON.stringify({ tier: 'free' }),
-    });
-    if (res.status === 409) {
-      // Already has a key — go to dashboard
-      window.location.href = '/dashboard';
-      return;
-    }
-    showStep('2');
+    // Try to resolve the key; admin always goes straight to step 3
+    const handled = await handleExistingSession(email);
+    if (!handled) showStep('2');
   } catch (e) {
     showError('login-error', e.message);
-  } finally {
     btn.disabled = false;
     btn.textContent = 'Sign In';
   }
@@ -251,10 +288,11 @@ function selectTier(el) {
 
 async function chooseTier() {
   const btn = document.querySelector('#step-2 .btn');
+  const errId = 'tier-error';
+  showError(errId, '');
   btn.disabled = true;
 
   if (selectedTier !== 'free') {
-    // Redirect to Stripe Checkout
     btn.textContent = 'Redirecting to checkout...';
     try {
       const res = await fetch(`${BASE}/auth/checkout`, {
@@ -263,15 +301,13 @@ async function chooseTier() {
         body: JSON.stringify({ tier: selectedTier }),
       });
       const data = await res.json();
-      if (data.checkout_url) {
-        window.location.href = data.checkout_url;
-        return;
-      }
-      throw new Error(data.error || 'Could not create checkout session');
+      if (!res.ok) throw new Error(data.error || `Checkout failed (${res.status})`);
+      if (data.checkout_url) { window.location.href = data.checkout_url; return; }
+      throw new Error('No checkout URL returned. Please try again.');
     } catch (e) {
+      showError(errId, e.message);
       btn.textContent = 'Continue';
       btn.disabled = false;
-      alert(e.message);
       return;
     }
   }
@@ -285,14 +321,17 @@ async function chooseTier() {
       body: JSON.stringify({ tier: 'free' }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Key generation failed');
+    if (!res.ok) {
+      if (res.status === 401) throw new Error('Session expired. Please sign in again.');
+      throw new Error(data.error || `Key generation failed (${res.status})`);
+    }
     generatedKey = data.api_key;
     document.getElementById('api-key-display').textContent = generatedKey;
     showStep('3');
   } catch (e) {
+    showError(errId, e.message);
     btn.textContent = 'Continue';
     btn.disabled = false;
-    alert(e.message);
   }
 }
 
@@ -307,7 +346,6 @@ function copyKey() {
 // Handle Stripe success redirect
 const params = new URLSearchParams(window.location.search);
 if (params.get('checkout') === 'success' && params.get('session_id')) {
-  // After Stripe payment, provision key
   (async () => {
     try {
       const res = await fetch(`${BASE}/auth/stripe-success?session_id=${params.get('session_id')}`);
@@ -316,8 +354,10 @@ if (params.get('checkout') === 'success' && params.get('session_id')) {
         generatedKey = data.api_key;
         document.getElementById('api-key-display').textContent = generatedKey;
         showStep('3');
+      } else {
+        console.error('Stripe success but no API key returned:', data);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error('Stripe success handler failed:', e); }
   })();
 }
 </script>
