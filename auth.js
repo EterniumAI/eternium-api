@@ -811,6 +811,48 @@ export async function handleStripeWebhook(request, env) {
 			}
 			break;
 		}
+		case 'payment_intent.succeeded': {
+			const pi = event.data.object;
+			// Mirror to Supabase stripe_payments for P&L dashboard
+			if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
+				const email = pi.receipt_email
+					|| pi.metadata?.email
+					|| pi.charges?.data?.[0]?.billing_details?.email
+					|| null;
+				const row = {
+					stripe_payment_intent_id: pi.id,
+					stripe_customer_id:        pi.customer || null,
+					email:                     email,
+					amount_cents:              pi.amount,
+					currency:                  pi.currency || 'usd',
+					status:                    pi.status,
+					description:               pi.description || null,
+					metadata:                  pi.metadata || {},
+					created_at:                new Date(pi.created * 1000).toISOString(),
+				};
+				try {
+					const res = await fetch(`${env.SUPABASE_URL}/rest/v1/stripe_payments`, {
+						method: 'POST',
+						headers: {
+							'apikey':         env.SUPABASE_SERVICE_KEY,
+							'Authorization':  `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+							'Content-Type':   'application/json',
+							'Prefer':         'resolution=ignore-duplicates',
+						},
+						body: JSON.stringify(row),
+					});
+					if (!res.ok) {
+						const err = await res.text().catch(() => res.status);
+						console.log(`[Payments] Supabase insert failed for ${pi.id}: ${err}`);
+					} else {
+						console.log(`[Payments] Mirrored ${pi.id} (${pi.amount} ${pi.currency}) to stripe_payments`);
+					}
+				} catch (err) {
+					console.log(`[Payments] Supabase mirror error for ${pi.id}: ${err.message}`);
+				}
+			}
+			break;
+		}
 		case 'invoice.payment_failed': {
 			// ── Suspend hosting tenant on payment failure ──
 			const invoice = event.data.object;
