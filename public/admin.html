@@ -4,134 +4,509 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Eternium API — Admin</title>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #050505; --surface: #0a0a0a; --border: rgba(255,255,255,0.1); --text: #e8e8e8; --muted: #7a8ba0; --accent: #18b5f0; --accent2: #0d52bc; --green: #22c55e; --red: #ef4444; --yellow: #eab308; --code-bg: #080c10; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Montserrat', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
-  .container { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
+/* ── Palette ── */
+:root {
+  --bg:       #0a0a0a;
+  --surface:  #111111;
+  --surface2: #171717;
+  --border:   rgba(255,255,255,0.07);
+  --border2:  rgba(255,255,255,0.12);
+  --text:     #f0f0f0;
+  --muted:    #5a6473;
+  --muted2:   #8a95a3;
+  --cyan:     #06b6d4;
+  --cyan-dim: rgba(6,182,212,0.12);
+  --gold:     #C9A14A;
+  --gold-dim: rgba(201,161,74,0.12);
+  --green:    #22c55e;
+  --red:      #ef4444;
+  --yellow:   #eab308;
+  --mono:     'JetBrains Mono', monospace;
+}
 
-  /* Auth */
-  #admin-auth { text-align: center; padding: 6rem 0; }
-  #admin-auth h1 { font-size: 1.5rem; color: var(--accent); margin-bottom: 1rem; }
-  #admin-auth input { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.75rem; border-radius: 8px; width: 280px; font-size: 1rem; }
-  #admin-auth button { background: var(--accent); color: #fff; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-weight: 600; margin-left: 0.5rem; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Montserrat', sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; min-height: 100vh; }
 
-  /* Header */
-  #admin-panel { display: none; }
-  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem; }
-  header h1 { font-size: 1.3rem; color: var(--accent); }
-  .refresh { background: var(--surface); border: 1px solid var(--border); color: var(--muted); padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
-  .refresh:hover { border-color: var(--accent); color: var(--accent); }
+/* ── Auth screen ── */
+#admin-auth {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 100vh; gap: 1.5rem; padding: 2rem;
+}
+.auth-card {
+  background: var(--surface); border: 1px solid var(--border2); border-radius: 16px;
+  padding: 2.5rem; width: 100%; max-width: 400px;
+}
+.auth-logo { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.75rem; }
+.auth-logo-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+.auth-logo span { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted2); }
+.auth-card h1 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.35rem; }
+.auth-card p { font-size: 0.8rem; color: var(--muted2); margin-bottom: 1.5rem; }
+.auth-input-row { display: flex; gap: 0.5rem; }
+.auth-input-row input {
+  flex: 1; background: var(--surface2); border: 1px solid var(--border2); color: var(--text);
+  padding: 0.7rem 1rem; border-radius: 8px; font-size: 0.9rem; font-family: var(--mono);
+  outline: none; transition: border-color 0.2s;
+}
+.auth-input-row input:focus { border-color: var(--cyan); }
+.btn-primary {
+  background: var(--cyan); color: #000; border: none; padding: 0.7rem 1.25rem;
+  border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.85rem;
+  white-space: nowrap; transition: opacity 0.15s;
+}
+.btn-primary:hover { opacity: 0.85; }
+#admin-error { font-size: 0.8rem; color: var(--red); margin-top: 0.75rem; min-height: 1.2em; }
 
-  /* Stats */
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
-  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
-  .stat .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; font-weight: 600; }
-  .stat .val { font-size: 1.6rem; font-weight: 700; margin-top: 0.25rem; }
-  .green { color: var(--green); } .yellow { color: var(--yellow); } .red { color: var(--red); }
+/* ── Dashboard shell ── */
+#admin-panel { display: none; }
+.shell { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
 
-  /* Sections */
-  .section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; }
-  .section h3 { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 1rem; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 0.5rem 0.6rem; font-size: 0.8rem; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; }
-  .badge { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 4px; }
-  .badge-free { background: #22c55e22; color: var(--green); }
-  .badge-starter { background: #3b82f622; color: #60a5fa; }
-  .badge-builder { background: #6c63ff22; color: var(--accent); }
-  .badge-scale { background: #a78bfa22; color: var(--accent2); }
-  .badge-enterprise { background: #eab30822; color: var(--yellow); }
-  .action-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 0.2rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
-  .action-btn:hover { border-color: var(--red); color: var(--red); }
-  .action-btn.activate:hover { border-color: var(--green); color: var(--green); }
+/* ── Top bar ── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.75rem 1.75rem; border-bottom: 1px solid var(--border);
+  background: rgba(10,10,10,0.95); position: sticky; top: 0; z-index: 100;
+  backdrop-filter: blur(8px);
+}
+.topbar-left { display: flex; align-items: center; gap: 0.75rem; }
+.logo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); flex-shrink: 0; }
+.topbar-title { font-size: 0.85rem; font-weight: 700; letter-spacing: 0.04em; color: var(--text); }
+.topbar-sub { font-size: 0.7rem; color: var(--muted); font-family: var(--mono); }
+.topbar-right { display: flex; align-items: center; gap: 0.75rem; }
+.date-range {
+  display: flex; align-items: center; gap: 0.5rem; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 7px; padding: 0.35rem 0.75rem;
+  font-size: 0.75rem; color: var(--muted2); cursor: default;
+}
+.date-range-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); }
+.btn-refresh {
+  background: var(--surface2); border: 1px solid var(--border); color: var(--muted2);
+  padding: 0.35rem 0.9rem; border-radius: 7px; cursor: pointer; font-size: 0.75rem;
+  font-weight: 600; transition: all 0.15s; font-family: 'Montserrat', sans-serif;
+}
+.btn-refresh:hover { border-color: var(--cyan); color: var(--cyan); }
+#last-refresh { font-size: 0.72rem; color: var(--muted); font-family: var(--mono); }
 
-  /* Alerts */
-  .alerts { display: grid; gap: 0.75rem; }
-  .alert { background: var(--code-bg); border-left: 3px solid; padding: 0.75rem 1rem; border-radius: 0 6px 6px 0; font-size: 0.85rem; }
-  .alert.warning { border-color: var(--yellow); }
-  .alert.danger { border-color: var(--red); }
-  .alert.info { border-color: var(--accent); }
-  .alert .title { font-weight: 600; margin-bottom: 0.25rem; }
+/* ── Content area ── */
+.content { padding: 1.5rem 1.75rem; max-width: 1280px; margin: 0 auto; width: 100%; }
 
-  .empty { text-align: center; color: var(--muted); padding: 2rem; font-size: 0.9rem; }
-  footer { text-align: center; padding: 1.5rem 0; color: var(--muted); font-size: 0.75rem; border-top: 1px solid var(--border); margin-top: 1rem; }
+/* ── Section wrapper ── */
+.section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 1.25rem; overflow: hidden; }
+.section-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem 0.75rem; border-bottom: 1px solid var(--border); }
+.section-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted2); }
+.section-body { padding: 1.25rem; }
+
+/* ── Stat tiles ── */
+.tile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+.tile-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+.tile {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 1.1rem 1.25rem; transition: border-color 0.2s;
+}
+.tile:hover { border-color: var(--border2); }
+.tile-label { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 0.35rem; }
+.tile-val { font-size: 1.75rem; font-weight: 800; line-height: 1.1; font-family: var(--mono); }
+.tile-sub { font-size: 0.7rem; color: var(--muted2); margin-top: 0.2rem; }
+.tile-accent { border-top: 2px solid var(--cyan); }
+.tile-gold { border-top: 2px solid var(--gold); }
+.c-cyan  { color: var(--cyan); }
+.c-gold  { color: var(--gold); }
+.c-green { color: var(--green); }
+.c-red   { color: var(--red); }
+.c-yellow{ color: var(--yellow); }
+.c-muted { color: var(--muted2); }
+
+/* ── Credit package tiles ── */
+.pkg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem; }
+.pkg {
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 12px;
+  padding: 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; position: relative;
+  transition: border-color 0.2s;
+}
+.pkg:hover { border-color: var(--border2); }
+.pkg-popular { border-color: rgba(201,161,74,0.4); }
+.pkg-badge {
+  position: absolute; top: -0.55rem; right: 1rem;
+  background: var(--gold); color: #000; font-size: 0.62rem; font-weight: 800;
+  letter-spacing: 0.06em; padding: 0.15rem 0.55rem; border-radius: 4px; text-transform: uppercase;
+}
+.pkg-price { font-size: 1.6rem; font-weight: 800; font-family: var(--mono); }
+.pkg-credits { font-size: 0.78rem; color: var(--muted2); font-family: var(--mono); }
+.pkg-save { font-size: 0.7rem; color: var(--gold); font-weight: 600; }
+.pkg-btn {
+  margin-top: 0.5rem; padding: 0.55rem 1rem; border-radius: 7px; font-size: 0.78rem;
+  font-weight: 700; cursor: not-allowed; text-align: center; font-family: 'Montserrat', sans-serif;
+  border: 1px solid var(--border2); color: var(--muted2); background: var(--surface);
+}
+.pkg-coming { font-size: 0.65rem; color: var(--muted); text-align: center; margin-top: 0.25rem; font-family: var(--mono); }
+
+/* ── Payment method tabs ── */
+.pay-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+.pay-tab {
+  padding: 0.45rem 1rem; border-radius: 7px; font-size: 0.78rem; font-weight: 600;
+  border: 1px solid var(--border); color: var(--muted2); background: var(--surface2);
+  cursor: pointer; transition: all 0.15s;
+}
+.pay-tab.active { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+.pay-placeholder { padding: 1.5rem; text-align: center; background: var(--surface2); border: 1px dashed var(--border2); border-radius: 8px; }
+.pay-placeholder p { font-size: 0.8rem; color: var(--muted2); }
+.pay-placeholder small { font-size: 0.7rem; color: var(--muted); font-family: var(--mono); }
+
+/* ── Auto payments ── */
+.autopay-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+.autopay-label { font-size: 0.9rem; font-weight: 600; }
+.autopay-sub { font-size: 0.75rem; color: var(--muted2); margin-top: 0.15rem; }
+.toggle-wrap { display: flex; align-items: center; gap: 0.6rem; }
+.toggle {
+  width: 40px; height: 22px; border-radius: 11px; background: var(--surface2);
+  border: 1px solid var(--border2); position: relative; cursor: not-allowed; flex-shrink: 0;
+}
+.toggle-knob {
+  width: 16px; height: 16px; border-radius: 50%; background: var(--muted);
+  position: absolute; top: 2px; left: 2px; transition: left 0.2s;
+}
+.disabled-note { font-size: 0.7rem; color: var(--muted); font-family: var(--mono); padding: 0.75rem 0; }
+
+/* ── Tables ── */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  text-align: left; padding: 0.6rem 0.75rem; font-size: 0.65rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+  background: var(--surface2); border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+thead th:first-child { border-radius: 0; }
+tbody td {
+  padding: 0.6rem 0.75rem; font-size: 0.8rem; border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: rgba(255,255,255,0.02); }
+td.mono { font-family: var(--mono); font-size: 0.75rem; }
+td.num { text-align: right; font-family: var(--mono); font-size: 0.78rem; }
+.empty-state { text-align: center; color: var(--muted); padding: 2.5rem 1rem; font-size: 0.82rem; }
+.empty-state small { display: block; font-size: 0.7rem; margin-top: 0.25rem; font-family: var(--mono); }
+
+/* ── Badges ── */
+.badge { display: inline-block; font-size: 0.65rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+.badge-free       { background: rgba(34,197,94,0.12);   color: var(--green); }
+.badge-starter    { background: rgba(96,165,250,0.12);  color: #60a5fa; }
+.badge-builder    { background: var(--cyan-dim);         color: var(--cyan); }
+.badge-scale      { background: rgba(167,139,250,0.12); color: #a78bfa; }
+.badge-enterprise { background: var(--gold-dim);         color: var(--gold); }
+
+/* ── Action buttons ── */
+.action-btn {
+  background: none; border: 1px solid var(--border); color: var(--muted2);
+  padding: 0.2rem 0.55rem; border-radius: 5px; cursor: pointer; font-size: 0.7rem;
+  font-weight: 600; transition: all 0.15s;
+}
+.action-btn:hover          { border-color: var(--red);   color: var(--red); }
+.action-btn.activate:hover { border-color: var(--green); color: var(--green); }
+.action-btn.invoice        { cursor: not-allowed; opacity: 0.4; }
+
+/* ── Alerts ── */
+.alerts-list { display: grid; gap: 0.6rem; }
+.alert { background: var(--surface2); border-left: 3px solid; padding: 0.75rem 1rem; border-radius: 0 8px 8px 0; font-size: 0.82rem; }
+.alert.warning { border-color: var(--yellow); }
+.alert.danger  { border-color: var(--red); }
+.alert.info    { border-color: var(--cyan); }
+.alert-title   { font-weight: 700; margin-bottom: 0.2rem; font-size: 0.8rem; }
+
+/* ── Health indicator ── */
+.health-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 0.4rem; vertical-align: middle; }
+.health-dot.ok  { background: var(--green); box-shadow: 0 0 4px var(--green); }
+.health-dot.err { background: var(--red);   box-shadow: 0 0 4px var(--red); }
+
+/* ── Footer ── */
+footer { text-align: center; padding: 1.5rem; color: var(--muted); font-size: 0.7rem; font-family: var(--mono); border-top: 1px solid var(--border); margin-top: 0.5rem; }
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .topbar { padding: 0.65rem 1rem; }
+  .content { padding: 1rem; }
+  .tile-val { font-size: 1.4rem; }
+  .topbar-sub, .date-range, #last-refresh { display: none; }
+  .auth-input-row { flex-direction: column; }
+}
 </style>
 </head>
 <body>
-<div class="container">
 
-  <div id="admin-auth">
+<!-- ── Auth ── -->
+<div id="admin-auth">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-dot"></div>
+      <span>Eternium API</span>
+    </div>
     <h1>Admin Access</h1>
-    <input id="admin-key" type="password" placeholder="Admin API key">
-    <button onclick="adminLogin()">Enter</button>
-    <div id="admin-error" style="color:var(--red);margin-top:0.5rem;font-size:0.85rem;"></div>
+    <p>Enter your admin API key to continue.</p>
+    <div class="auth-input-row">
+      <input id="admin-key" type="password" placeholder="etrn_..." autocomplete="current-password"
+        onkeydown="if(event.key==='Enter') adminLogin()">
+      <button class="btn-primary" onclick="adminLogin()">Enter</button>
+    </div>
+    <div id="admin-error"></div>
   </div>
+</div>
 
-  <div id="admin-panel">
-    <header>
-      <h1>Eternium API — Admin</h1>
-      <div>
-        <span id="last-refresh" style="color:var(--muted);font-size:0.8rem;margin-right:1rem;"></span>
-        <button class="refresh" onclick="loadAll()">Refresh</button>
+<!-- ── Dashboard ── -->
+<div id="admin-panel">
+  <div class="shell">
+
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="logo-dot"></div>
+        <div>
+          <div class="topbar-title">Eternium API</div>
+          <div class="topbar-sub">Admin Dashboard</div>
+        </div>
       </div>
-    </header>
-
-    <!-- Alerts -->
-    <div class="section" id="alerts-section" style="display:none;">
-      <h3>Alerts</h3>
-      <div class="alerts" id="alerts"></div>
-    </div>
-
-    <!-- Revenue stats -->
-    <div class="stats">
-      <div class="stat"><div class="label">Total Users</div><div class="val" id="s-users">0</div></div>
-      <div class="stat"><div class="label">Paying Users</div><div class="val green" id="s-paying">0</div></div>
-      <div class="stat"><div class="label">MRR</div><div class="val green" id="s-mrr">$0</div></div>
-      <div class="stat"><div class="label">Total Revenue (MTD)</div><div class="val" id="s-revenue">$0</div></div>
-      <div class="stat"><div class="label">Credits Spent (MTD)</div><div class="val" id="s-credits">0</div></div>
-      <div class="stat"><div class="label">Total Generations</div><div class="val" id="s-gens">0</div></div>
-      <div class="stat"><div class="label">Kie.ai Cost (est)</div><div class="val yellow" id="s-cost">$0</div></div>
-      <div class="stat"><div class="label">Gross Margin</div><div class="val green" id="s-margin">0%</div></div>
-    </div>
-
-    <!-- Users table -->
-    <div class="section">
-      <h3>All Users</h3>
-      <table>
-        <thead>
-          <tr><th>Email</th><th>Name</th><th>Tier</th><th>Spent</th><th>Gens</th><th>Cached</th><th>Key</th><th>Created</th><th>Actions</th></tr>
-        </thead>
-        <tbody id="users-body">
-          <tr><td colspan="9" class="empty">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Model breakdown -->
-    <div class="section">
-      <h3>Model Usage (All Users, This Month)</h3>
-      <table>
-        <thead><tr><th>Model</th><th>Generations</th><th>Revenue</th><th>Est. Cost</th><th>Margin</th></tr></thead>
-        <tbody id="models-body">
-          <tr><td colspan="5" class="empty">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Kie.ai health -->
-    <div class="section">
-      <h3>System Health</h3>
-      <div class="stats" style="margin-bottom:0;">
-        <div class="stat"><div class="label">Kie.ai Status</div><div class="val green" id="h-kie">--</div></div>
-        <div class="stat"><div class="label">Kie.ai Credits</div><div class="val" id="h-credits">--</div></div>
-        <div class="stat"><div class="label">Cache Hit Rate</div><div class="val green" id="h-cache">--</div></div>
-        <div class="stat"><div class="label">Avg Response</div><div class="val" id="h-latency">--</div></div>
+      <div class="topbar-right">
+        <div class="date-range">
+          <div class="date-range-dot"></div>
+          Month to date
+        </div>
+        <span id="last-refresh"></span>
+        <button class="btn-refresh" onclick="loadAll()">Refresh</button>
       </div>
     </div>
 
-    <footer>Eternium Admin &middot; Data refreshes on demand</footer>
+    <div class="content">
+
+      <!-- Alerts (hidden until data arrives) -->
+      <div class="section" id="alerts-section" style="display:none;">
+        <div class="section-header"><span class="section-title">Alerts</span></div>
+        <div class="section-body">
+          <div class="alerts-list" id="alerts"></div>
+        </div>
+      </div>
+
+      <!-- Row 1: Revenue + users -->
+      <div class="tile-grid">
+        <div class="tile tile-accent">
+          <div class="tile-label">Total Users</div>
+          <div class="tile-val c-cyan" id="s-users">—</div>
+          <div class="tile-sub">All registered</div>
+        </div>
+        <div class="tile tile-accent">
+          <div class="tile-label">Paying Users</div>
+          <div class="tile-val c-green" id="s-paying">—</div>
+          <div class="tile-sub">Active subscriptions</div>
+        </div>
+        <div class="tile tile-accent">
+          <div class="tile-label">MRR</div>
+          <div class="tile-val c-green" id="s-mrr">—</div>
+          <div class="tile-sub">Monthly recurring</div>
+        </div>
+        <div class="tile tile-accent">
+          <div class="tile-label">Revenue (MTD)</div>
+          <div class="tile-val c-green" id="s-revenue">—</div>
+          <div class="tile-sub">Total billed</div>
+        </div>
+      </div>
+
+      <!-- Row 2: Usage + health -->
+      <div class="tile-grid-2">
+        <div class="tile tile-gold">
+          <div class="tile-label">Credits Spent (MTD)</div>
+          <div class="tile-val c-gold" id="s-credits">—</div>
+          <div class="tile-sub">API credit consumption</div>
+        </div>
+        <div class="tile tile-gold">
+          <div class="tile-label">Total Generations</div>
+          <div class="tile-val" id="s-gens">—</div>
+          <div class="tile-sub">All-time requests served</div>
+        </div>
+        <div class="tile tile-gold">
+          <div class="tile-label">Est. Upstream Cost</div>
+          <div class="tile-val c-yellow" id="s-cost">—</div>
+          <div class="tile-sub">Kie.ai pass-through</div>
+        </div>
+        <div class="tile tile-gold">
+          <div class="tile-label">Gross Margin</div>
+          <div class="tile-val c-green" id="s-margin">—</div>
+          <div class="tile-sub">Revenue minus cost</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Cache Hit Rate</div>
+          <div class="tile-val c-cyan" id="h-cache">—</div>
+          <div class="tile-sub">Deduplicated requests</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Kie.ai Status</div>
+          <div class="tile-val" id="h-kie" style="font-size:1.1rem;font-weight:700;">—</div>
+          <div class="tile-sub" id="h-credits-sub">Credits: <span id="h-credits">—</span></div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Rate Limit</div>
+          <div class="tile-val" style="font-size:1rem;font-weight:700;font-family:var(--mono);">20 req/10s</div>
+          <div class="tile-sub">100+ concurrent · HTTP 429 on overload</div>
+        </div>
+      </div>
+
+      <!-- Model breakdown -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Model Breakdown — This Month</span>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th style="text-align:right">Calls</th>
+                <th style="text-align:right">Revenue</th>
+                <th style="text-align:right">Est. Cost</th>
+                <th style="text-align:right">Margin</th>
+              </tr>
+            </thead>
+            <tbody id="models-body">
+              <tr><td colspan="5" class="empty-state">Loading...<small>fetching model data</small></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- All Users -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">All Users</span>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Tier</th>
+                <th style="text-align:right">Spent</th>
+                <th style="text-align:right">Gens</th>
+                <th style="text-align:right">Cached</th>
+                <th>Key</th>
+                <th>Created</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="users-body">
+              <tr><td colspan="9" class="empty-state">Loading...<small>fetching user data</small></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Add Credits -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Add Credits</span>
+          <span style="font-size:0.7rem;color:var(--muted);font-family:var(--mono);">Credits never expire</span>
+        </div>
+        <div class="section-body">
+          <div class="pkg-grid">
+            <div class="pkg">
+              <div class="pkg-price">$5</div>
+              <div class="pkg-credits">1,000 credits</div>
+              <div class="pkg-save">&nbsp;</div>
+              <div class="pkg-btn">Select</div>
+              <div class="pkg-coming">Billing phase 1</div>
+            </div>
+            <div class="pkg">
+              <div class="pkg-price">$50</div>
+              <div class="pkg-credits">10,000 credits</div>
+              <div class="pkg-save">&nbsp;</div>
+              <div class="pkg-btn">Select</div>
+              <div class="pkg-coming">Billing phase 1</div>
+            </div>
+            <div class="pkg pkg-popular">
+              <div class="pkg-badge">Save 5%</div>
+              <div class="pkg-price">$500</div>
+              <div class="pkg-credits">105,000 credits</div>
+              <div class="pkg-save">Save $25 vs. base rate</div>
+              <div class="pkg-btn">Select</div>
+              <div class="pkg-coming">Billing phase 1</div>
+            </div>
+            <div class="pkg">
+              <div class="pkg-badge">Save 10%</div>
+              <div class="pkg-price c-gold">$1,250</div>
+              <div class="pkg-credits">275,000 credits</div>
+              <div class="pkg-save">Save $125 vs. base rate</div>
+              <div class="pkg-btn">Select</div>
+              <div class="pkg-coming">Billing phase 1</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Payment Method -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Payment Method</span>
+        </div>
+        <div class="section-body">
+          <div class="pay-tabs">
+            <div class="pay-tab active">Card</div>
+            <div class="pay-tab">PayPal</div>
+            <div class="pay-tab">Apple Pay</div>
+            <div class="pay-tab">Bitcoin</div>
+          </div>
+          <div class="pay-placeholder">
+            <p>Card billing not yet active.</p>
+            <small>Available in billing phase 1 — Stripe integration in progress.</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- Transaction History -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Transaction History</span>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date / Time</th>
+                <th style="text-align:right">Credits</th>
+                <th style="text-align:right">Amount</th>
+                <th>Invoice</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="4" class="empty-state">
+                  No transactions yet.
+                  <small>Purchase history will appear here once billing is active.</small>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Automatic Payments -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Automatic Payments</span>
+        </div>
+        <div class="section-body">
+          <div class="autopay-row">
+            <div>
+              <div class="autopay-label">Auto Top-Up</div>
+              <div class="autopay-sub">Recharge automatically when balance drops below threshold</div>
+            </div>
+            <div class="toggle-wrap">
+              <div class="toggle"><div class="toggle-knob"></div></div>
+            </div>
+          </div>
+          <div class="disabled-note">// Billing phase 1 required — automatic payments are not yet active.</div>
+        </div>
+      </div>
+
+      <footer>Eternium Admin &middot; Data refreshes on demand &middot; api.eternium.ai</footer>
+    </div>
   </div>
 </div>
 
@@ -145,9 +520,16 @@ function esc(s) {
   return d.innerHTML;
 }
 
+function fmt(n, decimals) {
+  if (n == null || n === 0) return decimals != null ? '—' : '—';
+  if (decimals != null) return Number(n).toFixed(decimals);
+  return Number(n).toLocaleString();
+}
+
 function adminLogin() {
   adminKey = document.getElementById('admin-key').value.trim();
   if (!adminKey) return;
+  document.getElementById('admin-error').textContent = '';
   loadAll();
 }
 
@@ -168,67 +550,95 @@ async function loadAll() {
 
     document.getElementById('admin-auth').style.display = 'none';
     document.getElementById('admin-panel').style.display = 'block';
-    document.getElementById('last-refresh').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+    document.getElementById('last-refresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
 
-    // Stats
-    document.getElementById('s-users').textContent = data.total_users || 0;
-    document.getElementById('s-paying').textContent = data.paying_users || 0;
-    document.getElementById('s-mrr').textContent = '$' + (data.mrr || 0).toFixed(0);
-    document.getElementById('s-revenue').textContent = '$' + (data.total_spent || 0).toFixed(2);
-    document.getElementById('s-credits').textContent = (data.total_credits || 0).toLocaleString();
-    document.getElementById('s-gens').textContent = data.total_generations || 0;
-    document.getElementById('s-cost').textContent = '$' + (data.estimated_kie_cost || 0).toFixed(2);
+    // ── Stats ──
+    const su = data.total_users || 0;
+    document.getElementById('s-users').textContent = su > 0 ? su.toLocaleString() : '0';
 
-    const margin = data.total_spent > 0
-      ? ((1 - (data.estimated_kie_cost / data.total_spent)) * 100).toFixed(0)
-      : '0';
-    document.getElementById('s-margin').textContent = margin + '%';
-    document.getElementById('s-margin').className = 'val ' + (margin > 20 ? 'green' : margin > 10 ? 'yellow' : 'red');
+    const sp = data.paying_users || 0;
+    document.getElementById('s-paying').textContent = sp > 0 ? sp.toLocaleString() : '0';
 
-    // Alerts
+    const mrr = data.mrr || 0;
+    document.getElementById('s-mrr').textContent = mrr > 0 ? '$' + mrr.toFixed(0) : '$0';
+
+    const rev = data.total_spent || 0;
+    document.getElementById('s-revenue').textContent = rev > 0 ? '$' + rev.toFixed(2) : '$0';
+
+    const cr = data.total_credits || 0;
+    document.getElementById('s-credits').textContent = cr > 0 ? cr.toLocaleString() : '0';
+
+    const gens = data.total_generations || 0;
+    document.getElementById('s-gens').textContent = gens > 0 ? gens.toLocaleString() : '0';
+
+    const cost = data.estimated_kie_cost || 0;
+    document.getElementById('s-cost').textContent = cost > 0 ? '$' + cost.toFixed(2) : '$0';
+
+    const margin = rev > 0 ? ((1 - (cost / rev)) * 100).toFixed(0) : '0';
+    const mEl = document.getElementById('s-margin');
+    mEl.textContent = margin + '%';
+    mEl.className = 'tile-val ' + (margin > 20 ? 'c-green' : margin > 10 ? 'c-yellow' : 'c-red');
+
+    // ── Health ──
+    const kieStatus = data.kie_status || 'OK';
+    const hKie = document.getElementById('h-kie');
+    hKie.innerHTML = `<span class="health-dot ${kieStatus === 'OK' ? 'ok' : 'err'}"></span>${esc(kieStatus)}`;
+
+    document.getElementById('h-credits').textContent = data.kie_credits
+      ? Number(data.kie_credits).toLocaleString()
+      : '—';
+
+    const cacheRate = data.cache_hit_rate || 0;
+    document.getElementById('h-cache').textContent = cacheRate > 0 ? cacheRate + '%' : '0%';
+
+    // ── Alerts ──
     const alerts = data.alerts || [];
     if (alerts.length > 0) {
       document.getElementById('alerts-section').style.display = 'block';
       document.getElementById('alerts').innerHTML = alerts.map(a =>
-        `<div class="alert ${esc(a.level)}"><div class="title">${esc(a.title)}</div>${esc(a.message)}</div>`
+        `<div class="alert ${esc(a.level)}"><div class="alert-title">${esc(a.title)}</div>${esc(a.message)}</div>`
       ).join('');
     }
 
-    // Users table
+    // ── Model breakdown ──
+    const models = (data.model_breakdown || []).slice().sort((a, b) => (b.cost || 0) - (a.cost || 0));
+    document.getElementById('models-body').innerHTML = models.length === 0
+      ? '<tr><td colspan="5" class="empty-state">No usage data yet.<small>Model stats appear after first generation</small></td></tr>'
+      : models.map(m => {
+          const mgn = (m.revenue || 0) > 0
+            ? ((1 - (m.cost || 0) / m.revenue) * 100).toFixed(0)
+            : '—';
+          const mgnClass = mgn === '—' ? 'c-muted' : mgn > 20 ? 'c-green' : mgn > 10 ? 'c-yellow' : 'c-red';
+          return `<tr>
+            <td class="mono" style="color:var(--cyan)">${esc(m.model)}</td>
+            <td class="num">${(m.count || 0).toLocaleString()}</td>
+            <td class="num c-green">$${(m.revenue || 0).toFixed(2)}</td>
+            <td class="num c-yellow">$${(m.cost || 0).toFixed(2)}</td>
+            <td class="num ${mgnClass}">${mgn}${mgn !== '—' ? '%' : ''}</td>
+          </tr>`;
+        }).join('');
+
+    // ── Users table ──
     const users = data.users || [];
     document.getElementById('users-body').innerHTML = users.length === 0
-      ? '<tr><td colspan="9" class="empty">No users yet.</td></tr>'
+      ? '<tr><td colspan="9" class="empty-state">No users yet.<small>Users appear here after signup</small></td></tr>'
       : users.map(u => `
-        <tr>
-          <td>${esc(u.email)}</td>
-          <td>${esc(u.name || '—')}</td>
-          <td><span class="badge badge-${esc(u.tier)}">${esc(u.tier)}</span></td>
-          <td>$${(u.spent || 0).toFixed(2)}</td>
-          <td>${u.generations || 0}</td>
-          <td>${u.cached || 0}</td>
-          <td style="font-family:monospace;font-size:0.75rem;color:var(--muted);">${u.key ? esc(u.key.slice(0, 10)) + '...' : '—'}</td>
-          <td>${u.created ? new Date(u.created).toLocaleDateString() : '—'}</td>
-          <td>
-            ${u.active !== false
-              ? `<button class="action-btn" onclick="revokeUser('${esc(u.email)}')">Revoke</button>`
-              : `<button class="action-btn activate" onclick="activateUser('${esc(u.email)}')">Activate</button>`}
-          </td>
-        </tr>
-      `).join('');
-
-    // Model breakdown
-    const models = data.model_breakdown || [];
-    document.getElementById('models-body').innerHTML = models.length === 0
-      ? '<tr><td colspan="5" class="empty">No usage data yet.</td></tr>'
-      : models.map(m => {
-        const mgn = m.revenue > 0 ? ((1 - m.cost / m.revenue) * 100).toFixed(0) : '0';
-        return `<tr><td>${esc(m.model)}</td><td>${m.count}</td><td>$${m.revenue.toFixed(2)}</td><td>$${m.cost.toFixed(2)}</td><td>${mgn}%</td></tr>`;
-      }).join('');
-
-    // Health
-    document.getElementById('h-kie').textContent = data.kie_status || 'OK';
-    document.getElementById('h-credits').textContent = data.kie_credits || '—';
-    document.getElementById('h-cache').textContent = (data.cache_hit_rate || 0) + '%';
+          <tr>
+            <td class="mono" style="font-size:0.75rem">${esc(u.email)}</td>
+            <td>${esc(u.name || '—')}</td>
+            <td><span class="badge badge-${esc(u.tier)}">${esc(u.tier)}</span></td>
+            <td class="num c-green">$${(u.spent || 0).toFixed(2)}</td>
+            <td class="num">${(u.generations || 0).toLocaleString()}</td>
+            <td class="num c-muted">${(u.cached || 0).toLocaleString()}</td>
+            <td class="mono" style="font-size:0.7rem;color:var(--muted)">${u.key ? esc(u.key.slice(0, 10)) + '…' : '—'}</td>
+            <td class="mono" style="font-size:0.72rem;color:var(--muted2)">${u.created ? new Date(u.created).toLocaleDateString() : '—'}</td>
+            <td>
+              ${u.active !== false
+                ? `<button class="action-btn" onclick="revokeUser('${esc(u.email)}')">Revoke</button>`
+                : `<button class="action-btn activate" onclick="activateUser('${esc(u.email)}')">Activate</button>`}
+            </td>
+          </tr>
+        `).join('');
 
   } catch (e) {
     if (e.message !== 'Not admin') console.error(e);
@@ -245,6 +655,14 @@ async function activateUser(email) {
   await adminFetch(`/admin/users/${encodeURIComponent(email)}/activate`);
   loadAll();
 }
+
+// Pay tab interactivity (visual only)
+document.querySelectorAll('.pay-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.pay-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+  });
+});
 </script>
 </body>
 </html>
