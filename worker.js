@@ -1242,6 +1242,14 @@ export default {
 			return json(result.data, result.code, cors);
 		}
 
+		// GET /products/:slug/access  — product delivery gate
+		// Public: no JWT → returns authUrl; valid JWT → grants access + download URL
+		const productAccessMatch = url.pathname.match(/^\/products\/([^/]+)\/access$/);
+		if (productAccessMatch && request.method === 'GET') {
+			const result = await handleProductAccess(request, decodeURIComponent(productAccessMatch[1]), env);
+			return json(result.data, result.code, cors);
+		}
+
 		// Blog slug match (must be after /blog to avoid conflict with /blog/publish)
 		const publicBlogMatch = url.pathname.match(/^\/v1\/content\/blog\/([^/]+)$/);
 		if (publicBlogMatch && request.method === 'GET' && publicBlogMatch[1] !== 'publish') {
@@ -1878,6 +1886,91 @@ async function handleAdminDeleteProduct(env, slug) {
 	if (error) return { data: { error }, code: 500 };
 	if (!data || (Array.isArray(data) && data.length === 0)) return { data: { error: 'Product not found' }, code: 404 };
 	return { data: { ok: true, slug }, code: 200 };
+}
+
+// ── Product access gate ────────────────────────────────────────────────────────
+// GET /products/:slug/access
+//   — no mandatory auth (public endpoint).
+//   — If Authorization header contains a valid Supabase JWT:
+//       grant access, write to KV + Supabase, return signed download URL.
+//   — If no/invalid JWT:
+//       return { requiresAuth: true, authUrl: '...signup.html?...' }
+//       so the frontend can redirect the user to sign up / log in.
+//
+// After auth, the frontend redirects back with the JWT and calls this endpoint
+// again (or calls POST /resources/grant directly).
+//
+// Product ↔ resource slug mapping lives in PRODUCT_RESOURCE_MAP below.
+// Products without a mapped resource (e.g. paid repos) get a 403.
+
+const PRODUCT_RESOURCE_MAP = {
+	// armory_products.slug → RESOURCES slug
+	'tech-stack':          'ep3',
+	'ep3-ai-tech-stack':   'ep3',
+	'ai-tech-stack':       'ep3',
+};
+
+async function handleProductAccess(request, productSlug, env) {
+	// 1. Resolve resource slug for this product
+	const resourceSlug = PRODUCT_RESOURCE_MAP[productSlug];
+	if (!resourceSlug) {
+		// Check if the product exists at all in Supabase
+		const { data: productRows } = await supabaseQuery(env, 'armory_products', {
+			select: 'slug,name,requires_auth',
+			filters: { slug: `eq.${productSlug}`, is_active: 'eq.true' },
+			limit: 1,
+		}).catch(() => ({ data: null }));
+		const product = productRows?.[0];
+		if (!product) return { data: { error: 'Product not found' }, code: 404 };
+		// Product exists but has no free resource (e.g. paid repo)
+		return { data: { error: 'This product has no free downloadable resource' }, code: 403 };
+	}
+
+	const meta = RESOURCES[resourceSlug];
+	if (!meta) return { data: { error: 'Resource not configured' }, code: 500 };
+
+	// 2. Try to authenticate the caller
+	const rawToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+	const auth = rawToken ? await resolveJWTAuth(rawToken, env) : null;
+
+	const base = new URL(request.url).origin;
+
+	if (!auth) {
+		// Not logged in — return the auth URL so the frontend can redirect
+		const returnTo = `${base}/products/${productSlug}/access`;
+		const authUrl = `${base}/signup.html?resource=${encodeURIComponent(resourceSlug)}&return_to=${encodeURIComponent(returnTo)}`;
+		return {
+			data: {
+				requiresAuth: true,
+				resource:     resourceSlug,
+				productSlug,
+				authUrl,
+				message:      'Create a free account to access this resource.',
+			},
+			code: 401,
+		};
+	}
+
+	// 3. Authenticated — grant access and return a signed download URL
+	const errors = await grantResourceAccess(auth.email, resourceSlug, env, auth.supabaseUid || null);
+	const expiry = Math.floor(Date.now() / 1000) + RESOURCE_URL_TTL;
+	const sig    = await signResourceUrl(resourceSlug, expiry, env);
+	const downloadUrl = `${base}/resources/download?r=${encodeURIComponent(resourceSlug)}&exp=${expiry}&sig=${sig}`;
+
+	return {
+		data: {
+			ok:          true,
+			email:       auth.email,
+			resource:    resourceSlug,
+			productSlug,
+			name:        meta.name,
+			filename:    meta.filename,
+			downloadUrl,
+			expiresAt:   new Date(expiry * 1000).toISOString(),
+			...(errors.length ? { warnings: errors } : {}),
+		},
+		code: 200,
+	};
 }
 
 // ── Resource access (gated R2 downloads) ─────────────────────────
