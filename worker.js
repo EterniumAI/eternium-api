@@ -1230,6 +1230,18 @@ export default {
 			return json(result.data, result.code, cors);
 		}
 
+		// ── Armory product catalog (public) ───────────────────────────
+		if (url.pathname === '/v1/products' && request.method === 'GET') {
+			const result = await handleGetProducts(env);
+			return json(result.data, result.code, cors);
+		}
+
+		const productSlugMatch = url.pathname.match(/^\/v1\/products\/([^/]+)$/);
+		if (productSlugMatch && request.method === 'GET') {
+			const result = await handleGetProduct(env, decodeURIComponent(productSlugMatch[1]));
+			return json(result.data, result.code, cors);
+		}
+
 		// Blog slug match (must be after /blog to avoid conflict with /blog/publish)
 		const publicBlogMatch = url.pathname.match(/^\/v1\/content\/blog\/([^/]+)$/);
 		if (publicBlogMatch && request.method === 'GET' && publicBlogMatch[1] !== 'publish') {
@@ -1284,6 +1296,25 @@ export default {
 			if (url.pathname === '/admin/test-invite' && request.method === 'POST') {
 				const result = await handleAdminTestInvite(request, env);
 				return json(result.data || { error: result.error }, result.code, cors);
+			}
+
+			// ── Armory product admin CRUD ────────────────────────────
+			if (url.pathname === '/admin/products' && request.method === 'POST') {
+				const result = await handleAdminCreateProduct(request, env);
+				return json(result.data, result.code, cors);
+			}
+
+			const adminProductSlugMatch = url.pathname.match(/^\/admin\/products\/([^/]+)$/);
+			if (adminProductSlugMatch) {
+				const pSlug = decodeURIComponent(adminProductSlugMatch[1]);
+				if (request.method === 'PATCH') {
+					const result = await handleAdminUpdateProduct(request, env, pSlug);
+					return json(result.data, result.code, cors);
+				}
+				if (request.method === 'DELETE') {
+					const result = await handleAdminDeleteProduct(env, pSlug);
+					return json(result.data, result.code, cors);
+				}
 			}
 
 			return json({ error: 'Not found' }, 404, cors);
@@ -1482,6 +1513,38 @@ async function supabaseUpdate(env, table, id, updates) {
 	return { data: await resp.json(), error: null };
 }
 
+async function supabaseInsert(env, table, record) {
+	const baseUrl = env.SUPABASE_URL;
+	const key = env.SUPABASE_SERVICE_KEY;
+	if (!baseUrl || !key) return { data: null, error: 'Supabase not configured' };
+	const resp = await fetch(`${baseUrl}/rest/v1/${table}`, {
+		method: 'POST',
+		headers: {
+			'apikey': key, 'Authorization': `Bearer ${key}`,
+			'Content-Type': 'application/json', 'Prefer': 'return=representation',
+		},
+		body: JSON.stringify(record),
+	});
+	if (!resp.ok) return { data: null, error: `Insert failed: ${resp.status} ${await resp.text()}` };
+	return { data: await resp.json(), error: null };
+}
+
+async function supabaseUpdateBySlug(env, table, slug, updates) {
+	const baseUrl = env.SUPABASE_URL;
+	const key = env.SUPABASE_SERVICE_KEY;
+	if (!baseUrl || !key) return { data: null, error: 'Supabase not configured' };
+	const resp = await fetch(`${baseUrl}/rest/v1/${table}?slug=eq.${encodeURIComponent(slug)}`, {
+		method: 'PATCH',
+		headers: {
+			'apikey': key, 'Authorization': `Bearer ${key}`,
+			'Content-Type': 'application/json', 'Prefer': 'return=representation',
+		},
+		body: JSON.stringify(updates),
+	});
+	if (!resp.ok) return { data: null, error: `Update failed: ${resp.status} ${await resp.text()}` };
+	return { data: await resp.json(), error: null };
+}
+
 // ── Content API handlers ─────────────────────────────────────────
 
 async function handleListBlogPosts(env, params) {
@@ -1674,6 +1737,119 @@ async function handleListDatasets(env, params) {
 
 	if (error) return { data: { error }, code: 500 };
 	return { data: { datasets: data || [], count: (data || []).length }, code: 200 };
+}
+
+// ── Armory product catalog ───────────────────────────────────────
+// Maps armory_products DB row (snake_case) to public API shape (camelCase).
+function productToApi(p) {
+	return {
+		slug:                p.slug,
+		name:                p.name,
+		series:              p.series              ?? null,
+		episode:             p.episode             ?? null,
+		tagline:             p.tagline             ?? null,
+		description:         p.description         ?? null,
+		demoUrl:             p.demo_url            ?? null,
+		githubRepo:          p.github_repo         ?? null,
+		pdfUrl:              p.pdf_url             ?? null,
+		pdfFilename:         p.pdf_filename        ?? null,
+		resourceTitle:       p.resource_title      ?? null,
+		resourceDescription: p.resource_description ?? null,
+		manychatKeyword:     p.manychat_keyword    ?? null,
+		requiresAuth:        p.requires_auth       ?? true,
+		imageUrl:            p.image_url           ?? null,
+		stats:               p.stats               ?? {},
+		features:            p.features            ?? [],
+	};
+}
+
+async function handleGetProducts(env) {
+	const { data, error } = await supabaseQuery(env, 'armory_products', {
+		select: 'slug,name,series,episode,tagline,description,demo_url,github_repo,pdf_url,pdf_filename,resource_title,resource_description,manychat_keyword,requires_auth,image_url,stats,features',
+		filters: [{ col: 'is_active', op: 'eq', val: 'true' }],
+		order: 'sort_order',
+	});
+	if (error) return { data: { error }, code: 500 };
+	const products = (data || []).map(productToApi);
+	return { data: { products, count: products.length }, code: 200 };
+}
+
+async function handleGetProduct(env, slug) {
+	const { data, error } = await supabaseQuery(env, 'armory_products', {
+		select: 'slug,name,series,episode,tagline,description,demo_url,github_repo,pdf_url,pdf_filename,resource_title,resource_description,manychat_keyword,requires_auth,image_url,stats,features',
+		filters: [{ col: 'slug', op: 'eq', val: slug }, { col: 'is_active', op: 'eq', val: 'true' }],
+		single: true,
+	});
+	if (error || !data) return { data: { error: 'Product not found' }, code: 404 };
+	return { data: { product: productToApi(data) }, code: 200 };
+}
+
+// Admin: create product
+async function handleAdminCreateProduct(request, env) {
+	let body;
+	try { body = await request.json(); } catch { return { data: { error: 'Invalid JSON' }, code: 400 }; }
+	if (!body.slug || !body.name) return { data: { error: 'slug and name are required' }, code: 400 };
+
+	const record = {
+		slug:                body.slug,
+		name:                body.name,
+		series:              body.series              ?? null,
+		episode:             body.episode             ?? null,
+		tagline:             body.tagline             ?? null,
+		description:         body.description         ?? null,
+		demo_url:            body.demoUrl             ?? null,
+		github_repo:         body.githubRepo          ?? null,
+		pdf_url:             body.pdfUrl              ?? null,
+		pdf_filename:        body.pdfFilename         ?? null,
+		resource_title:      body.resourceTitle       ?? null,
+		resource_description: body.resourceDescription ?? null,
+		manychat_keyword:    body.manychatKeyword     ?? null,
+		requires_auth:       body.requiresAuth        ?? true,
+		image_url:           body.imageUrl            ?? null,
+		stats:               body.stats               ?? {},
+		features:            body.features            ?? [],
+		sort_order:          body.sortOrder           ?? 0,
+		is_active:           body.isActive            ?? true,
+	};
+
+	const { data, error } = await supabaseInsert(env, 'armory_products', record);
+	if (error) return { data: { error }, code: 500 };
+	return { data: { product: productToApi(Array.isArray(data) ? data[0] : data) }, code: 201 };
+}
+
+// Admin: update product by slug
+async function handleAdminUpdateProduct(request, env, slug) {
+	let body;
+	try { body = await request.json(); } catch { return { data: { error: 'Invalid JSON' }, code: 400 }; }
+
+	// Map camelCase input to snake_case columns (only provided fields)
+	const fieldMap = {
+		name: 'name', series: 'series', episode: 'episode', tagline: 'tagline',
+		description: 'description', demoUrl: 'demo_url', githubRepo: 'github_repo',
+		pdfUrl: 'pdf_url', pdfFilename: 'pdf_filename', resourceTitle: 'resource_title',
+		resourceDescription: 'resource_description', manychatKeyword: 'manychat_keyword',
+		requiresAuth: 'requires_auth', imageUrl: 'image_url', stats: 'stats',
+		features: 'features', sortOrder: 'sort_order', isActive: 'is_active',
+	};
+	const updates = {};
+	for (const [camel, snake] of Object.entries(fieldMap)) {
+		if (camel in body) updates[snake] = body[camel];
+	}
+	if (Object.keys(updates).length === 0) return { data: { error: 'No valid fields to update' }, code: 400 };
+
+	const { data, error } = await supabaseUpdateBySlug(env, 'armory_products', slug, updates);
+	if (error) return { data: { error }, code: 500 };
+	if (!data || (Array.isArray(data) && data.length === 0)) return { data: { error: 'Product not found' }, code: 404 };
+	const row = Array.isArray(data) ? data[0] : data;
+	return { data: { product: productToApi(row) }, code: 200 };
+}
+
+// Admin: delete product by slug (soft delete via is_active = false)
+async function handleAdminDeleteProduct(env, slug) {
+	const { data, error } = await supabaseUpdateBySlug(env, 'armory_products', slug, { is_active: false });
+	if (error) return { data: { error }, code: 500 };
+	if (!data || (Array.isArray(data) && data.length === 0)) return { data: { error: 'Product not found' }, code: 404 };
+	return { data: { ok: true, slug }, code: 200 };
 }
 
 function slugify(text) {
