@@ -16,6 +16,7 @@
  */
 
 import { handleProvisionTenant, handleUpdateTenant } from './tenant.js';
+import { processFinanceEvent } from './lib/finance.js';
 
 // ── Tier → Stripe Price ID mapping ──────────────────────────────
 // Create these products/prices in Stripe Dashboard, then paste IDs here.
@@ -880,6 +881,14 @@ export async function handleStripeWebhook(request, env) {
 			}
 			break;
 		}
+	}
+
+	// ── Finance side-effects: sync to Supabase + Telegram notification ──
+	// Runs after all provisioning logic; non-blocking on failures.
+	try {
+		await processFinanceEvent(event, env);
+	} catch (err) {
+		console.log(`[Finance] processFinanceEvent error: ${err.message}`);
 	}
 
 	return { data: { received: true }, code: 200 };

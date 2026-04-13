@@ -35,6 +35,8 @@ import {
 	handleMediaUpload, handleMediaServe, handleMediaDelete,
 } from './media.js';
 
+import { syncMRR } from './lib/finance.js';
+
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
 const CREDIT_VALUE = 0.005; // 1 credit = $0.005 (200 credits per dollar)
@@ -1332,6 +1334,13 @@ export default {
 					const result = await handleAdminDeleteProduct(env, pSlug);
 					return json(result.data, result.code, cors);
 				}
+			}
+
+			// ── Stripe MRR sync ──────────────────────────────────────
+			if (url.pathname === '/admin/stripe/sync' && request.method === 'GET') {
+				const result = await syncMRR(env);
+				if (result.error) return json({ error: result.error }, 500, cors);
+				return json(result, 200, cors);
 			}
 
 			return json({ error: 'Not found' }, 404, cors);
