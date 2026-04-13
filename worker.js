@@ -38,6 +38,7 @@ import {
 import { syncMRR } from './lib/finance.js';
 import { runDailySOP } from './lib/daily-sop.js';
 import { handleResendWebhook, handleResendSync, handleResendDomains } from './lib/resend.js';
+import { handleCreditBalance, handleCreditDeduct, handleCreditAdd, handleCreditHistory } from './lib/credits.js';
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
@@ -1348,6 +1349,13 @@ export default {
 				}
 			}
 
+			// ── Admin credit add ─────────────────────────────────────
+			if (url.pathname === '/admin/credits/add' && request.method === 'POST') {
+				const body = await request.json();
+				const result = await handleCreditAdd(env, body);
+				return json(result.data, result.code, cors);
+			}
+
 			// ── Stripe MRR sync ──────────────────────────────────────
 			if (url.pathname === '/admin/morning-brief' && request.method === 'GET') {
 				const result = await runDailySOP(env);
@@ -1481,6 +1489,25 @@ export default {
 		// GET /v1/usage
 		if (url.pathname === '/v1/usage' && request.method === 'GET') {
 			const result = await handleUsage(env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// GET /v1/credits/balance
+		if (url.pathname === '/v1/credits/balance' && request.method === 'GET') {
+			const result = await handleCreditBalance(env, keyData, TIERS);
+			return json(result.data, result.code, headers);
+		}
+
+		// POST /v1/credits/deduct
+		if (url.pathname === '/v1/credits/deduct' && request.method === 'POST') {
+			const body = await request.json();
+			const result = await handleCreditDeduct(env, keyData, body, TIERS);
+			return json(result.data, result.code, headers);
+		}
+
+		// GET /v1/credits/history
+		if (url.pathname === '/v1/credits/history' && request.method === 'GET') {
+			const result = await handleCreditHistory(env, keyData);
 			return json(result.data, result.code, headers);
 		}
 
