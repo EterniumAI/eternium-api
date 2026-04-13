@@ -92,7 +92,7 @@ const OPENAI_COSTS = {
 };
 
 // ── Markup multipliers ──────────────────────────────────────────
-const MARKUP = { image: 1.35, video: 1.30, chat: 1.30, embedding: 1.20, audio: 1.25 };
+const MARKUP = { image: 1.35, video: 1.40, chat: 1.30, embedding: 1.35, audio: 1.30 };
 const PARTNER_MARKUP = 1.18; // flat 18% across all types for partner-tier clients
 
 // ── Cost → credits (returns integer) ────────────────────────────
