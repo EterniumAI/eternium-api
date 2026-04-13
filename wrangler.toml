@@ -73,5 +73,10 @@ bucket_name = "eternium-media"
 # NOTE: Route commented out for deploy — already configured in Cloudflare from prior deploy.
 # Token missing Zone > Workers Routes > Edit permission. Re-enable when token is updated.
 
+# ── Cron Triggers ─────────────────────────────────────────────────
+# Daily SOP morning brief at 7:30 AM MST (13:30 UTC)
+[triggers]
+crons = ["30 13 * * *"]
+
 [assets]
 directory = "./public"

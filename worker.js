@@ -36,6 +36,7 @@ import {
 } from './media.js';
 
 import { syncMRR } from './lib/finance.js';
+import { runDailySOP } from './lib/daily-sop.js';
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
@@ -1061,6 +1062,10 @@ async function handleUsage(env, keyData) {
 
 // ── Main handler ────────────────────────────────────────────────
 export default {
+	async scheduled(event, env, ctx) {
+		ctx.waitUntil(runDailySOP(env));
+	},
+
 	async fetch(request, env) {
 		const url = new URL(request.url);
 		const origin = request.headers.get('Origin') || '';
@@ -1337,6 +1342,12 @@ export default {
 			}
 
 			// ── Stripe MRR sync ──────────────────────────────────────
+			if (url.pathname === '/admin/morning-brief' && request.method === 'GET') {
+				const result = await runDailySOP(env);
+				if (result.error) return json({ error: result.error }, 500, cors);
+				return json(result, 200, cors);
+			}
+
 			if (url.pathname === '/admin/stripe/sync' && request.method === 'GET') {
 				const result = await syncMRR(env);
 				if (result.error) return json({ error: result.error }, 500, cors);
