@@ -36,6 +36,7 @@ import {
 } from './media.js';
 
 import { syncMRR } from './lib/finance.js';
+import { handleResendWebhook, handleResendSync, handleResendDomains } from './lib/resend.js';
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
@@ -1215,6 +1216,12 @@ export default {
 			return json(result.data || { error: result.error }, result.code, cors);
 		}
 
+		// ── Resend webhook ──────────────────────────────────────────
+		if (url.pathname === '/webhooks/resend' && request.method === 'POST') {
+			const result = await handleResendWebhook(request, env);
+			return json(result.data || { error: result.error }, result.code, cors);
+		}
+
 		// ── Public Content API routes ────────────────────────────────
 		// These are publicly readable (no auth required)
 		if (url.pathname === '/v1/content/blog' && request.method === 'GET') {
@@ -1341,6 +1348,17 @@ export default {
 				const result = await syncMRR(env);
 				if (result.error) return json({ error: result.error }, 500, cors);
 				return json(result, 200, cors);
+			}
+
+			// ── Resend email sync ────────────────────────────────────
+			if (url.pathname === '/admin/resend/sync' && request.method === 'GET') {
+				const result = await handleResendSync(env);
+				return json(result.data || { error: result.error }, result.code, cors);
+			}
+
+			if (url.pathname === '/admin/resend/domains' && request.method === 'GET') {
+				const result = await handleResendDomains(env);
+				return json(result.data || { error: result.error }, result.code, cors);
 			}
 
 			return json({ error: 'Not found' }, 404, cors);
