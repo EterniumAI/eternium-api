@@ -317,7 +317,7 @@ aside.sidebar{
       <div class="hero">
         <div class="hero-kicker">api.eternium.ai / v1</div>
         <h1 class="hero-title">Eternium API Reference</h1>
-        <p class="hero-sub">A unified REST API for AI image generation, video generation, chat, embeddings, and audio. Built on Cloudflare Workers. Global edge. 200 credits per dollar.</p>
+        <p class="hero-sub">A unified REST API for AI image generation, video generation, chat, embeddings, and audio. Free to use. Credits power everything. 1 credit = $0.005 (200 per dollar).</p>
         <div class="base-url-block">
           <span class="base-url-label">Base URL</span>
           <span class="base-url-val">https://api.eternium.ai</span>
@@ -379,10 +379,17 @@ curl https://api.eternium.ai/v1/usage \
 
     <section class="doc-section" id="credits">
       <div class="doc-section-title">Credits</div>
-      <p class="doc-section-sub">All paid operations consume credits. 1 credit = $0.005 (200 credits per dollar). Credits never expire.</p>
+      <p class="doc-section-sub">All products are free to use. Credits power everything across the Eternium ecosystem (Helix, CentraMind, API). 1 credit = $0.005 (200 credits per dollar). Credits never expire.</p>
       <div class="callout info">
         <span class="callout-icon">&#x1F4B0;</span>
         <div class="callout-text">Image generation: ~10-50 credits per request depending on model. Video generation: ~100-500 credits. Chat: ~1-5 credits per 1k tokens. Embeddings: ~1 credit per 1k tokens.</div>
+      </div>
+      <div class="callout info">
+        <span class="callout-icon">&#x1F4C5;</span>
+        <div class="callout-text">
+          <strong>Monthly subscriptions:</strong> Free (100 credits), Starter $29/mo (4,400 credits), Builder $79/mo (12,400 credits), Scale $199/mo (33,000 credits).<br>
+          <strong>Credit packs:</strong> Starter $7 (500), Creator $22 (2,000), Pro $49 (5,000), Studio $129 (15,000). One-time purchase, added to your balance.
+        </div>
       </div>
     </section>
 
@@ -477,11 +484,12 @@ curl https://api.eternium.ai/v1/usage \
           <span class="auth-badge jwt">jwt</span><span class="ep-desc-inline">Stripe checkout</span>
         </div>
         <div class="ep-body">
-          <p class="ep-description">Creates a Stripe checkout session for a subscription tier. Returns a URL to redirect the user.</p>
+          <p class="ep-description">Creates a Stripe checkout session for a subscription tier or a one-time credit pack. Returns a URL to redirect the user.</p>
           <table class="params-table">
             <thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
             <tbody>
-              <tr><td class="p-name">tier</td><td class="p-type">string</td><td class="p-req">required</td><td class="p-desc"><code>starter</code> or <code>pro</code></td></tr>
+              <tr><td class="p-name">tier</td><td class="p-type">string</td><td class="p-opt">one of</td><td class="p-desc"><code>starter</code>, <code>builder</code>, or <code>scale</code> (monthly subscription)</td></tr>
+              <tr><td class="p-name">pack</td><td class="p-type">string</td><td class="p-opt">one of</td><td class="p-desc"><code>starter</code>, <code>creator</code>, <code>pro</code>, or <code>studio</code> (one-time credit pack)</td></tr>
               <tr><td class="p-name">success_url</td><td class="p-type">string</td><td class="p-opt">optional</td><td class="p-desc">Post-payment redirect URL</td></tr>
             </tbody>
           </table>
@@ -496,7 +504,7 @@ curl https://api.eternium.ai/v1/usage \
         <div class="ep-body">
           <p class="ep-description">Issues an API key after payment confirmation. Returned exactly once -- store it securely.</p>
           <div class="code-block"><div class="code-block-header"><span class="code-lang">response</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
-          <pre><span class="jp">{</span> <span class="jk">"key"</span><span class="jp">:</span> <span class="js">"etrn_..."</span><span class="jp">,</span> <span class="jk">"tier"</span><span class="jp">:</span> <span class="js">"starter"</span><span class="jp">,</span> <span class="jk">"credits"</span><span class="jp">:</span> <span class="jv">5000</span> <span class="jp">}</span></pre></div>
+          <pre><span class="jp">{</span> <span class="jk">"key"</span><span class="jp">:</span> <span class="js">"etrn_..."</span><span class="jp">,</span> <span class="jk">"tier"</span><span class="jp">:</span> <span class="js">"starter"</span><span class="jp">,</span> <span class="jk">"credits"</span><span class="jp">:</span> <span class="jv">4400</span> <span class="jp">}</span></pre></div>
         </div>
       </div>
 

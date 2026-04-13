@@ -18,12 +18,19 @@
 import { handleProvisionTenant, handleUpdateTenant } from './tenant.js';
 import { processFinanceEvent } from './lib/finance.js';
 
-// ── Tier → Stripe Price ID mapping ──────────────────────────────
-// Create these products/prices in Stripe Dashboard, then paste IDs here.
+// ── Tier → Stripe Price ID mapping (unified pricing, prod_UKXrCWBcrvB0ui) ──
 const STRIPE_PRICES = {
-	starter: 'price_1TDYXRIyAjP5WeLpNtfCtiCB',    // $29/mo
-	builder: 'price_1TDYXTIyAjP5WeLpVz7mCzG6',    // $79/mo
-	scale: 'price_1TDYXVIyAjP5WeLpWo6KL0oE',      // $199/mo
+	starter: 'price_1TLslUIyAjP5WeLplyFvkvGz',    // $29/mo  4,400 credits
+	builder: 'price_1TLslUIyAjP5WeLpFYV9WDwo',    // $79/mo  12,400 credits
+	scale:   'price_1TLslVIyAjP5WeLpUhw0eTbr',    // $199/mo 33,000 credits
+};
+
+// ── Credit Pack → Stripe Price ID mapping (prod_UKXruFs5hwwP87) ──
+const CREDIT_PACK_PRICES = {
+	starter: { price: 'price_1TLslhIyAjP5WeLpFfz1QhoQ', dollars: 7,   credits: 500   },
+	creator: { price: 'price_1TLslhIyAjP5WeLpI9kYUMnk', dollars: 22,  credits: 2000  },
+	pro:     { price: 'price_1TLsliIyAjP5WeLpQQkZ9axR', dollars: 49,  credits: 5000  },
+	studio:  { price: 'price_1TLsliIyAjP5WeLp6ex4WODl', dollars: 129, credits: 15000 },
 };
 
 // ── One-time product purchases (Armory products) ───────────────
@@ -354,10 +361,24 @@ export async function handleCheckout(request, env) {
 	try { body = await request.json(); }
 	catch { return { error: 'Invalid body', code: 400 }; }
 
+	// Support both subscription tiers and credit packs
 	const tier = body.tier;
-	const priceId = STRIPE_PRICES[tier];
-	if (!priceId || priceId.includes('REPLACE')) {
-		return { error: `Stripe price not configured for tier: ${tier}. Set STRIPE_PRICES in auth.js.`, code: 500 };
+	const pack = body.pack;
+
+	if (!tier && !pack) {
+		return { error: 'Provide either "tier" (starter/builder/scale) or "pack" (starter/creator/pro/studio)', code: 400 };
+	}
+
+	const isPackPurchase = !!pack;
+	const priceId = isPackPurchase
+		? (CREDIT_PACK_PRICES[pack] && CREDIT_PACK_PRICES[pack].price)
+		: STRIPE_PRICES[tier];
+
+	if (!priceId) {
+		const valid = isPackPurchase
+			? Object.keys(CREDIT_PACK_PRICES).join(', ')
+			: Object.keys(STRIPE_PRICES).join(', ');
+		return { error: `Invalid ${isPackPurchase ? 'pack' : 'tier'}: ${pack || tier}. Valid: ${valid}`, code: 400 };
 	}
 
 	let user = await ensureSupabaseUser(auth.email, auth.supabaseUid, env);
@@ -369,7 +390,7 @@ export async function handleCheckout(request, env) {
 		const customer = await stripeRequest('POST', '/customers', {
 			email: user.email,
 			name: user.name || undefined,
-			'metadata[eternium_tier]': tier,
+			'metadata[eternium_tier]': tier || 'free',
 		}, env);
 		customerId = customer.id;
 		user.stripeCustomerId = customerId;
@@ -378,16 +399,24 @@ export async function handleCheckout(request, env) {
 
 	// Create Checkout Session
 	const origin = new URL(request.url).origin;
-	const session = await stripeRequest('POST', '/checkout/sessions', {
+	const sessionParams = {
 		customer: customerId,
 		'line_items[0][price]': priceId,
 		'line_items[0][quantity]': '1',
-		mode: 'subscription',
+		mode: isPackPurchase ? 'payment' : 'subscription',
 		success_url: `${origin}/signup?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
 		cancel_url: `${origin}/signup`,
 		'metadata[email]': user.email,
-		'metadata[tier]': tier,
-	}, env);
+	};
+
+	if (isPackPurchase) {
+		sessionParams['metadata[pack]'] = pack;
+		sessionParams['metadata[credits]'] = String(CREDIT_PACK_PRICES[pack].credits);
+	} else {
+		sessionParams['metadata[tier]'] = tier;
+	}
+
+	const session = await stripeRequest('POST', '/checkout/sessions', sessionParams, env);
 
 	return { data: { checkout_url: session.url }, code: 200 };
 }
@@ -723,6 +752,37 @@ export async function handleStripeWebhook(request, env) {
 				});
 				const result = await handleProvisionTenant(fakeRequest, env);
 				console.log(`[Hosting] Provisioned ${slug}: ${result.data ? 'OK' : result.error}`);
+				break;
+			}
+
+			// ── Credit pack purchase (one-time payment) ──
+			const packName = session.metadata?.pack;
+			const packCredits = parseInt(session.metadata?.credits, 10);
+			if (packName && packCredits > 0) {
+				const packEmail = session.customer_email || session.customer_details?.email || session.metadata?.email;
+				if (packEmail && env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
+					// Add credits to profile balance
+					const profileRes = await fetch(
+						`${env.SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(packEmail)}&select=api_credit_balance`,
+						{ headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+					);
+					const profiles = await profileRes.json().catch(() => []);
+					const currentBalance = profiles?.[0]?.api_credit_balance || 0;
+					await fetch(
+						`${env.SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(packEmail)}`,
+						{
+							method: 'PATCH',
+							headers: {
+								'apikey': env.SUPABASE_SERVICE_KEY,
+								'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+								'Content-Type': 'application/json',
+								'Prefer': 'return=minimal',
+							},
+							body: JSON.stringify({ api_credit_balance: currentBalance + packCredits }),
+						}
+					);
+					console.log(`[Credits] Pack "${packName}" +${packCredits} credits for ${packEmail} (balance: ${currentBalance} -> ${currentBalance + packCredits})`);
+				}
 				break;
 			}
 

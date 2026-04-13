@@ -433,7 +433,7 @@
   <div id="step-1">
     <div class="brand-mark"><img src="/assets/eternium-logo.png" style="height:32px;width:auto;object-fit:contain;" alt="Eternium"></div>
     <h1>Eternium <span>API</span></h1>
-    <p class="subtitle">AI generation built for agents. Get your key in 60 seconds.</p>
+    <p class="subtitle">Free to use. Credits power everything. Get your key in 60 seconds.</p>
     <div class="steps">
       <span class="step-pill active"></span>
       <span class="step-pill"></span>
@@ -472,7 +472,7 @@
   <div id="step-2" style="display:none;">
     <div class="brand-mark"><img src="/assets/eternium-logo.png" style="height:32px;width:auto;object-fit:contain;" alt="Eternium"></div>
     <h1>Choose Your <span>Plan</span></h1>
-    <p class="subtitle">Start free. Upgrade anytime.</p>
+    <p class="subtitle">All products are free. Credits power everything. 1 credit = $0.005.</p>
     <div class="steps">
       <span class="step-pill done"></span>
       <span class="step-pill active"></span>
@@ -480,6 +480,7 @@
     </div>
     <div class="card">
       <div id="tier-error" class="error" style="display:none;"></div>
+      <div style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:0.5rem;">Monthly Subscriptions</div>
       <div class="tier-grid">
         <div class="tier-option free-tier selected" data-tier="free" onclick="selectTier(this)">
           <div style="display:flex;justify-content:space-between;align-items:baseline;">
@@ -505,6 +506,29 @@
             <span class="name">Scale</span><span class="price">$199/mo</span>
           </div>
           <div class="detail">33,000 credits &middot; 60 req/min &middot; Teams &amp; production</div>
+        </div>
+      </div>
+      <div style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin:0.75rem 0 0.5rem;">Or buy a credit pack</div>
+      <div class="tier-grid" style="grid-template-columns:1fr 1fr;gap:0.5rem;">
+        <div class="tier-option" data-pack="starter" onclick="selectPack(this)">
+          <div class="name" style="font-size:0.85rem;">Starter</div>
+          <div class="price" style="font-size:0.8rem;">$7</div>
+          <div class="detail">500 credits</div>
+        </div>
+        <div class="tier-option" data-pack="creator" onclick="selectPack(this)">
+          <div class="name" style="font-size:0.85rem;">Creator</div>
+          <div class="price" style="font-size:0.8rem;">$22</div>
+          <div class="detail">2,000 credits</div>
+        </div>
+        <div class="tier-option" data-pack="pro" onclick="selectPack(this)">
+          <div class="name" style="font-size:0.85rem;">Pro</div>
+          <div class="price" style="font-size:0.8rem;">$49</div>
+          <div class="detail">5,000 credits</div>
+        </div>
+        <div class="tier-option" data-pack="studio" onclick="selectPack(this)">
+          <div class="name" style="font-size:0.85rem;">Studio</div>
+          <div class="price" style="font-size:0.8rem;">$129</div>
+          <div class="detail">15,000 credits</div>
         </div>
       </div>
       <button class="btn" onclick="chooseTier()">Continue</button>
@@ -554,6 +578,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let sessionToken = '';
 let selectedTier = 'free';
+let selectedPack = '';
 let generatedKey = '';
 
 function showError(id, msg) {
@@ -676,6 +701,14 @@ function selectTier(el) {
   document.querySelectorAll('.tier-option').forEach(t => t.classList.remove('selected'));
   el.classList.add('selected');
   selectedTier = el.dataset.tier;
+  selectedPack = '';
+}
+
+function selectPack(el) {
+  document.querySelectorAll('.tier-option').forEach(t => t.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedPack = el.dataset.pack;
+  selectedTier = '';
 }
 
 async function chooseTier() {
@@ -684,7 +717,29 @@ async function chooseTier() {
   showError(errId, '');
   btn.disabled = true;
 
-  if (selectedTier !== 'free') {
+  // Credit pack purchase
+  if (selectedPack) {
+    btn.textContent = 'Redirecting to checkout...';
+    try {
+      const res = await fetch(`${BASE}/auth/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+        body: JSON.stringify({ pack: selectedPack }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Checkout failed (${res.status})`);
+      if (data.checkout_url) { window.location.href = data.checkout_url; return; }
+      throw new Error('No checkout URL returned. Please try again.');
+    } catch (e) {
+      showError(errId, e.message);
+      btn.textContent = 'Continue';
+      btn.disabled = false;
+      return;
+    }
+  }
+
+  // Paid subscription tier
+  if (selectedTier && selectedTier !== 'free') {
     btn.textContent = 'Redirecting to checkout...';
     try {
       const res = await fetch(`${BASE}/auth/checkout`, {
