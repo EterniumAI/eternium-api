@@ -1230,6 +1230,23 @@ export default {
 			return json(result.data, result.code, cors);
 		}
 
+		// ── Affiliate public routes ──────────────────────────────────
+		// GET /v1/affiliate/leaderboard -- top 10 by earnings (anonymized)
+		if (url.pathname === '/v1/affiliate/leaderboard' && request.method === 'GET') {
+			const result = await handleAffiliateLeaderboard(env);
+			return json(result.data || { error: result.error }, result.code, cors);
+		}
+
+		// GET /v1/affiliate/track/:code -- increment clicks, return redirect URL
+		const affiliateTrackMatch = url.pathname.match(/^\/v1\/affiliate\/track\/([a-zA-Z0-9]{6,16})$/);
+		if (affiliateTrackMatch && request.method === 'GET') {
+			const result = await handleAffiliateTrack(affiliateTrackMatch[1], env);
+			if (result.redirect) {
+				return Response.redirect(result.redirect, 302);
+			}
+			return json(result.data || { error: result.error }, result.code, cors);
+		}
+
 		// ── Armory product catalog (public) ───────────────────────────
 		if (url.pathname === '/v1/products' && request.method === 'GET') {
 			const result = await handleGetProducts(env);
@@ -1451,9 +1468,174 @@ export default {
 			return json(result.data || { error: result.error }, result.code, headers);
 		}
 
+		// ── Affiliate routes ──────────────────────────────────────────
+		// GET /v1/affiliate/me -- current user's link + stats
+		if (url.pathname === '/v1/affiliate/me' && request.method === 'GET') {
+			const result = await handleAffiliateMe(env, keyData);
+			return json(result.data || { error: result.error }, result.code, headers);
+		}
+
+		// POST /v1/affiliate/generate -- create affiliate link
+		if (url.pathname === '/v1/affiliate/generate' && request.method === 'POST') {
+			const result = await handleAffiliateGenerate(env, keyData);
+			return json(result.data || { error: result.error }, result.code, headers);
+		}
+
 		return json({ error: 'Not found' }, 404, headers);
 	},
 };
+
+// ── Affiliate handlers ───────────────────────────────────────────
+
+function generateAffiliateCode() {
+	const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+	return Array.from(crypto.getRandomValues(new Uint8Array(8)))
+		.map(b => chars[b % chars.length]).join('');
+}
+
+async function supabasePost(env, table, row) {
+	const resp = await fetch(`${env.SUPABASE_URL}/rest/v1/${table}`, {
+		method: 'POST',
+		headers: {
+			'apikey': env.SUPABASE_SERVICE_KEY,
+			'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+			'Content-Type': 'application/json',
+			'Prefer': 'return=representation',
+		},
+		body: JSON.stringify(row),
+	});
+	if (!resp.ok) {
+		const err = await resp.text();
+		return { data: null, error: `Supabase error: ${resp.status} ${err}` };
+	}
+	const data = await resp.json();
+	return { data: Array.isArray(data) ? data[0] : data, error: null };
+}
+
+async function supabaseRpc(env, fn, params) {
+	const resp = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+		method: 'POST',
+		headers: {
+			'apikey': env.SUPABASE_SERVICE_KEY,
+			'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify(params),
+	});
+	if (!resp.ok) {
+		const err = await resp.text();
+		return { data: null, error: `Supabase RPC error: ${resp.status} ${err}` };
+	}
+	return { data: await resp.json(), error: null };
+}
+
+async function handleAffiliateMe(env, keyData) {
+	if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+		return { data: null, error: 'Database not configured', code: 503 };
+	}
+	const { data, error } = await supabaseQuery(env, 'affiliate_links', {
+		filters: [{ col: 'user_id', op: 'eq', val: keyData.supabase_uid || keyData.email }],
+		single: true,
+	});
+	if (error && !error.includes('406')) return { data: null, error, code: 500 };
+	if (!data) return { data: { link: null, message: 'No affiliate link yet. POST /v1/affiliate/generate to create one.' }, code: 200 };
+
+	const referralUrl = `https://eternium.ai?ref=${data.code}`;
+	return {
+		data: {
+			link: { ...data, referral_url: referralUrl },
+			unpaid: parseFloat(data.total_earned) - parseFloat(data.total_paid),
+		},
+		code: 200,
+	};
+}
+
+async function handleAffiliateGenerate(env, keyData) {
+	if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+		return { data: null, error: 'Database not configured', code: 503 };
+	}
+	// Check if one already exists
+	const { data: existing } = await supabaseQuery(env, 'affiliate_links', {
+		filters: [{ col: 'user_id', op: 'eq', val: keyData.supabase_uid || keyData.email }],
+		single: true,
+	});
+	if (existing) {
+		const referralUrl = `https://eternium.ai?ref=${existing.code}`;
+		return { data: { link: { ...existing, referral_url: referralUrl }, created: false }, code: 200 };
+	}
+
+	const code = generateAffiliateCode();
+	const { data, error } = await supabasePost(env, 'affiliate_links', {
+		user_id: keyData.supabase_uid || keyData.email,
+		code,
+	});
+	if (error) return { data: null, error, code: 500 };
+
+	const referralUrl = `https://eternium.ai?ref=${code}`;
+	return { data: { link: { ...data, referral_url: referralUrl }, created: true }, code: 201 };
+}
+
+async function handleAffiliateTrack(code, env) {
+	if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+		// Fail open: redirect to homepage even without DB
+		return { redirect: 'https://eternium.ai', code: 302 };
+	}
+
+	// Look up the code
+	const { data: link } = await supabaseQuery(env, 'affiliate_links', {
+		filters: [
+			{ col: 'code', op: 'eq', val: code },
+			{ col: 'status', op: 'eq', val: 'active' },
+		],
+		single: true,
+	});
+
+	if (link) {
+		// Increment clicks (fire-and-forget)
+		fetch(`${env.SUPABASE_URL}/rest/v1/affiliate_links?id=eq.${link.id}`, {
+			method: 'PATCH',
+			headers: {
+				'apikey': env.SUPABASE_SERVICE_KEY,
+				'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({ clicks: link.clicks + 1 }),
+		}).catch(() => {});
+
+		// Log event (fire-and-forget)
+		supabasePost(env, 'affiliate_events', {
+			affiliate_link_id: link.id,
+			event_type: 'click',
+			metadata: {},
+		}).catch(() => {});
+	}
+
+	return { redirect: `https://eternium.ai?ref=${code}`, code: 302 };
+}
+
+async function handleAffiliateLeaderboard(env) {
+	if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+		return { data: { leaderboard: [] }, code: 200 };
+	}
+	const { data, error } = await supabaseQuery(env, 'affiliate_links', {
+		select: 'id,code,signups,conversions,total_earned',
+		filters: [{ col: 'status', op: 'eq', val: 'active' }],
+		order: 'total_earned.desc',
+		limit: 10,
+	});
+	if (error) return { data: null, error, code: 500 };
+
+	// Anonymize: only expose aggregate stats, not user_id
+	const leaderboard = (data || []).map((row, i) => ({
+		rank: i + 1,
+		code: row.code,
+		signups: row.signups,
+		conversions: row.conversions,
+		total_earned: row.total_earned,
+	}));
+
+	return { data: { leaderboard }, code: 200 };
+}
 
 // ── Supabase REST helper ─────────────────────────────────────────
 // Direct REST API calls to Supabase (no SDK needed in Workers)
