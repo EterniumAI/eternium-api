@@ -41,7 +41,7 @@ import { handleResendWebhook, handleResendSync, handleResendDomains } from './li
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
-const CREDIT_VALUE = 0.005; // 1 credit = $0.005 (200 credits per dollar)
+const CREDIT_VALUE = 0.005; // 1 credit = $0.005 — half a penny (200 credits per dollar)
 
 // CORS: Open to all origins. Security is enforced by API key authentication,
 // not by origin restrictions. Every major API (OpenAI, Stripe, Twilio) does this.
