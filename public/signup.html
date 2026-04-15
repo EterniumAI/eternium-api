@@ -625,9 +625,9 @@ async function handleExistingSession(email) {
   document.getElementById('api-key-display').textContent = generatedKey;
 
   if (data.existing) {
-    // Show key with "existing key" subtitle
-    document.querySelector('#step-3 p.subtitle').textContent =
-      'Your existing API key. Use /auth/regenerate-key to rotate it.';
+    // Redirect existing users to the unified account dashboard
+    window.location.href = 'https://eternium.ai/account';
+    return true;
   }
   showStep('3');
   return true;
