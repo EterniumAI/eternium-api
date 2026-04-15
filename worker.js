@@ -23,7 +23,7 @@ import {
 	handleCheckout, handleProvisionKey, handleRegenerateKey,
 	handleStripeSuccess, handleStripeWebhook,
 	handleAdminOverview, handleAdminRevoke, handleAdminActivate, handleAdminTestInvite,
-	resolveJWTAuth, resolveSupabaseUser,
+	resolveJWTAuth, resolveSupabaseUser, authenticateRequest,
 } from './auth.js';
 
 import {
@@ -1485,33 +1485,30 @@ export default {
 		}
 
 		// ── Authenticated routes ─────────────────────────────────────
-		const apiKey = request.headers.get('X-API-Key')
-			|| (request.headers.get('Authorization') || '').replace('Bearer ', '');
-
-		if (!apiKey) {
-			return json({ error: 'Authentication required. Pass API key via X-API-Key header, or Bearer token.' }, 401, cors);
+		const authResult = await authenticateRequest(request, env, validateApiKey);
+		if (authResult.error) {
+			return json({ error: authResult.error }, authResult.code, cors);
 		}
 
-		let keyData = await validateApiKey(apiKey, env);
+		const { userId, email: authEmail, source: authSource, keyData } = authResult;
 
-		// If not a valid API key, try as Supabase JWT
-		if (!keyData) {
-			const auth = await resolveJWTAuth(apiKey, env);
-			if (auth) {
-				keyData = await resolveSupabaseUser(auth.email, auth.supabaseUid, env);
-			}
-		}
-
-		if (!keyData) {
-			return json({ error: 'Invalid API key or token' }, 403, cors);
-		}
+		// Attach auth context as non-enumerable properties on keyData for downstream use.
+		// Handlers that need the Supabase user_id can read keyData.__userId.
+		Object.defineProperties(keyData, {
+			__userId: { value: userId, writable: false },
+			__email: { value: authEmail, writable: false },
+			__authSource: { value: authSource, writable: false },
+		});
 
 		const tierConfig = TIERS[keyData.tier] || TIERS.free;
-		const rateLimit = checkRateLimit(apiKey, tierConfig.rateLimit);
+		const rateLimitKey = keyData.key || authEmail || userId || 'unknown';
+		const rateLimit = checkRateLimit(rateLimitKey, tierConfig.rateLimit);
 		const rlHeaders = {
 			'X-RateLimit-Remaining': String(rateLimit.remaining),
 			'X-RateLimit-Reset': String(Math.ceil(rateLimit.reset / 1000)),
 			'X-Tier': keyData.tier,
+			...(userId ? { 'X-User-Id': userId } : {}),
+			'X-Auth-Source': authSource,
 		};
 
 		if (!rateLimit.allowed) {
