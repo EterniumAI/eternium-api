@@ -1274,11 +1274,40 @@ export default {
 			return json(result.data, result.code, cors);
 		}
 
+		// GET /products/:slug/access  — product delivery gate
+		// Public: no JWT → returns authUrl; valid JWT → grants access + download URL
+		const productAccessMatch = url.pathname.match(/^\/products\/([^/]+)\/access$/);
+		if (productAccessMatch && request.method === 'GET') {
+			const result = await handleProductAccess(request, decodeURIComponent(productAccessMatch[1]), env);
+			return json(result.data, result.code, cors);
+		}
+
 		// Blog slug match (must be after /blog to avoid conflict with /blog/publish)
 		const publicBlogMatch = url.pathname.match(/^\/v1\/content\/blog\/([^/]+)$/);
 		if (publicBlogMatch && request.method === 'GET' && publicBlogMatch[1] !== 'publish') {
 			const result = await handleGetBlogPost(env, decodeURIComponent(publicBlogMatch[1]));
 			return json(result.data || { error: result.error }, result.code, cors);
+		}
+
+		// ── Resource endpoints (Supabase JWT auth or signed URL) ────────
+		// POST /resources/grant  — self-service: JWT user claims EP3 access
+		if (url.pathname === '/resources/grant' && request.method === 'POST') {
+			const result = await handleResourceGrant(request, env, null);
+			return json(result.data, result.code, cors);
+		}
+
+		// GET /resources/download?r=&exp=&sig=  — no auth, HMAC URL is the credential
+		if (url.pathname === '/resources/download' && request.method === 'GET') {
+			const res = await handleResourceDownload(request, env);
+			for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+			return res;
+		}
+
+		// GET /resources/:slug  — JWT auth, checks access, returns signed URL
+		const resourceMatch = url.pathname.match(/^\/resources\/([^/]+)$/);
+		if (resourceMatch && resourceMatch[1] !== 'download' && request.method === 'GET') {
+			const result = await handleResourceGet(request, resourceMatch[1], env);
+			return json(result.data, result.code, cors);
 		}
 
 		// ── Admin routes (require admin API key) ─────────────────────
@@ -1328,6 +1357,13 @@ export default {
 			if (url.pathname === '/admin/test-invite' && request.method === 'POST') {
 				const result = await handleAdminTestInvite(request, env);
 				return json(result.data || { error: result.error }, result.code, cors);
+			}
+
+			// ── Resource grant (admin: grant any email any resource) ─
+			if (url.pathname === '/admin/resources/grant' && request.method === 'POST') {
+				const adminData = await validateApiKey(request.headers.get('X-API-Key') || '', env);
+				const result = await handleResourceGrant(request, env, adminData?.email || 'admin');
+				return json(result.data, result.code, cors);
 			}
 
 			// ── Armory product admin CRUD ────────────────────────────
@@ -2097,6 +2133,352 @@ async function handleAdminDeleteProduct(env, slug) {
 	if (error) return { data: { error }, code: 500 };
 	if (!data || (Array.isArray(data) && data.length === 0)) return { data: { error: 'Product not found' }, code: 404 };
 	return { data: { ok: true, slug }, code: 200 };
+}
+
+// ── Product access gate ────────────────────────────────────────────────────────
+// GET /products/:slug/access
+//   — no mandatory auth (public endpoint).
+//   — If Authorization header contains a valid Supabase JWT:
+//       grant access, write to KV + Supabase, return signed download URL.
+//   — If no/invalid JWT:
+//       return { requiresAuth: true, authUrl: '...signup.html?...' }
+//       so the frontend can redirect the user to sign up / log in.
+//
+// After auth, the frontend redirects back with the JWT and calls this endpoint
+// again (or calls POST /resources/grant directly).
+//
+// Product ↔ resource slug mapping lives in PRODUCT_RESOURCE_MAP below.
+// Products without a mapped resource (e.g. paid repos) get a 403.
+
+const PRODUCT_RESOURCE_MAP = {
+	// armory_products.slug → RESOURCES slug
+	'tech-stack':          'ep3',
+	'ep3-ai-tech-stack':   'ep3',
+	'ai-tech-stack':       'ep3',
+};
+
+async function handleProductAccess(request, productSlug, env) {
+	// 1. Resolve resource slug for this product
+	const resourceSlug = PRODUCT_RESOURCE_MAP[productSlug];
+	if (!resourceSlug) {
+		// Check if the product exists at all in Supabase
+		const { data: productRows } = await supabaseQuery(env, 'armory_products', {
+			select: 'slug,name,requires_auth',
+			filters: { slug: `eq.${productSlug}`, is_active: 'eq.true' },
+			limit: 1,
+		}).catch(() => ({ data: null }));
+		const product = productRows?.[0];
+		if (!product) return { data: { error: 'Product not found' }, code: 404 };
+		// Product exists but has no free resource (e.g. paid repo)
+		return { data: { error: 'This product has no free downloadable resource' }, code: 403 };
+	}
+
+	const meta = RESOURCES[resourceSlug];
+	if (!meta) return { data: { error: 'Resource not configured' }, code: 500 };
+
+	// 2. Try to authenticate the caller
+	const rawToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+	const auth = rawToken ? await resolveJWTAuth(rawToken, env) : null;
+
+	const base = new URL(request.url).origin;
+
+	if (!auth) {
+		// Not logged in — return the auth URL so the frontend can redirect
+		const returnTo = `${base}/products/${productSlug}/access`;
+		const authUrl = `${base}/signup.html?resource=${encodeURIComponent(resourceSlug)}&return_to=${encodeURIComponent(returnTo)}`;
+		return {
+			data: {
+				requiresAuth: true,
+				resource:     resourceSlug,
+				productSlug,
+				authUrl,
+				message:      'Create a free account to access this resource.',
+			},
+			code: 401,
+		};
+	}
+
+	// 3. Authenticated — grant access and return a signed download URL
+	const errors = await grantResourceAccess(auth.email, resourceSlug, env, auth.supabaseUid || null);
+	const expiry = Math.floor(Date.now() / 1000) + RESOURCE_URL_TTL;
+	const sig    = await signResourceUrl(resourceSlug, expiry, env);
+	const downloadUrl = `${base}/resources/download?r=${encodeURIComponent(resourceSlug)}&exp=${expiry}&sig=${sig}`;
+
+	return {
+		data: {
+			ok:          true,
+			email:       auth.email,
+			resource:    resourceSlug,
+			productSlug,
+			name:        meta.name,
+			filename:    meta.filename,
+			downloadUrl,
+			expiresAt:   new Date(expiry * 1000).toISOString(),
+			...(errors.length ? { warnings: errors } : {}),
+		},
+		code: 200,
+	};
+}
+
+// ── Resource access (gated R2 downloads) ─────────────────────────
+// Resources map: slug -> R2 key + display name
+const RESOURCES = {
+	'ep3': {
+		r2Key:          'lead-magnets/ep3-ai-tech-stack-blueprint.pdf',
+		name:           'AI Tech Stack Blueprint',
+		filename:       'ep3-ai-tech-stack-blueprint.pdf',
+		mimeType:       'application/pdf',
+		leadMagnetTag:  'ep3_ai_tech_stack',
+	},
+};
+
+// Signed download URL: HMAC-SHA256 over "<resource>:<expiry-unix-sec>"
+// Key: RESOURCE_SECRET env var (fall back to SUPABASE_JWT_SECRET so no extra secret needed on day 1)
+const RESOURCE_URL_TTL = 3600; // 1 hour
+
+async function resourceSignatureKey(env) {
+	const raw = env.RESOURCE_SECRET || env.SUPABASE_JWT_SECRET || 'default-resource-secret';
+	return crypto.subtle.importKey(
+		'raw', new TextEncoder().encode(raw),
+		{ name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']
+	);
+}
+
+async function signResourceUrl(resource, expiry, env) {
+	const key = await resourceSignatureKey(env);
+	const msg = new TextEncoder().encode(`${resource}:${expiry}`);
+	const sig = await crypto.subtle.sign('HMAC', key, msg);
+	return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifyResourceSig(resource, expiry, sig, env) {
+	try {
+		const expected = await signResourceUrl(resource, expiry, env);
+		// Constant-time compare
+		if (expected.length !== sig.length) return false;
+		let diff = 0;
+		for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
+		return diff === 0;
+	} catch { return false; }
+}
+
+// Check if a Supabase UID has been granted a resource. Checks KV user record first.
+async function hasResourceAccess(supabaseUid, email, resource, env) {
+	// Fast path: KV user record
+	if (env.USERS && supabaseUid) {
+		try {
+			const emailFromUid = await env.USERS.get(`uid:${supabaseUid}`);
+			if (emailFromUid) {
+				const user = await env.USERS.get(`user:${emailFromUid.toLowerCase()}`, 'json');
+				if (user?.resources?.includes(resource)) return true;
+			}
+		} catch { /* fall through */ }
+	}
+	// Fallback: Supabase profiles table
+	if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY && email) {
+		try {
+			const res = await fetch(
+				`${env.SUPABASE_URL}/rest/v1/profiles?select=resources_granted&email=eq.${encodeURIComponent(email)}&limit=1`,
+				{ headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+			);
+			if (res.ok) {
+				const rows = await res.json();
+				if (rows[0]?.resources_granted?.includes(resource)) return true;
+			}
+		} catch { /* fall through */ }
+	}
+	return false;
+}
+
+// Write resource grant to KV + Supabase profiles.
+// supabaseUid is optional but enables UPSERT (creates profile row if absent).
+async function grantResourceAccess(email, resource, env, supabaseUid = null) {
+	const lowerEmail = email.toLowerCase();
+	const meta = RESOURCES[resource];
+	const errors = [];
+
+	// KV update — write resources + leadMagnets arrays onto the user record
+	if (env.USERS) {
+		try {
+			const user = await env.USERS.get(`user:${lowerEmail}`, 'json');
+			if (user) {
+				const resources    = Array.from(new Set([...(user.resources    || []), resource]));
+				const leadMagnets  = meta?.leadMagnetTag
+					? Array.from(new Set([...(user.leadMagnets || []), meta.leadMagnetTag]))
+					: (user.leadMagnets || []);
+				await env.USERS.put(`user:${lowerEmail}`, JSON.stringify({ ...user, resources, leadMagnets }));
+			}
+		} catch (e) { errors.push(`kv: ${e.message}`); }
+	}
+
+	// Supabase profiles upsert — captures email + tags lead_magnet + appends resources_granted
+	if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
+		try {
+			// Read existing row to merge resources_granted without overwriting other values
+			const getRes = await fetch(
+				`${env.SUPABASE_URL}/rest/v1/profiles?select=id,resources_granted&email=eq.${encodeURIComponent(lowerEmail)}&limit=1`,
+				{ headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+			);
+			const rows = getRes.ok ? await getRes.json() : [];
+			const existing = rows[0]?.resources_granted || [];
+			const merged   = Array.from(new Set([...existing, resource]));
+			const profileId = supabaseUid || rows[0]?.id;
+
+			// UPSERT when we have the profile id; PATCH by email when we don't
+			if (profileId) {
+				const upsertRes = await fetch(
+					`${env.SUPABASE_URL}/rest/v1/profiles`,
+					{
+						method: 'POST',
+						headers: {
+							apikey: env.SUPABASE_SERVICE_KEY,
+							Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+							'Content-Type': 'application/json',
+							Prefer: 'resolution=merge-duplicates,return=minimal',
+						},
+						body: JSON.stringify({
+							id:                profileId,
+							email:             lowerEmail,
+							resources_granted: merged,
+							lead_magnet:       meta?.leadMagnetTag || null,
+						}),
+					}
+				);
+				if (!upsertRes.ok) errors.push(`supabase-upsert: ${upsertRes.status}`);
+			} else {
+				// No uid yet — PATCH by email (profile must already exist)
+				const patchRes = await fetch(
+					`${env.SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(lowerEmail)}`,
+					{
+						method: 'PATCH',
+						headers: {
+							apikey: env.SUPABASE_SERVICE_KEY,
+							Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+							'Content-Type': 'application/json',
+							Prefer: 'return=minimal',
+						},
+						body: JSON.stringify({ resources_granted: merged, lead_magnet: meta?.leadMagnetTag || null }),
+					}
+				);
+				if (!patchRes.ok) errors.push(`supabase-patch: ${patchRes.status}`);
+			}
+		} catch (e) { errors.push(`supabase: ${e.message}`); }
+	}
+
+	return errors;
+}
+
+// POST /resources/grant
+// Self-service (JWT): user claims access to a resource after signing up.
+//   Authorization: Bearer <supabase_jwt>   +   body: { resource: 'ep3' }
+// Admin override: admin API key   +   body: { email: '...', resource: 'ep3' }
+async function handleResourceGrant(request, env, adminEmail = null) {
+	let body = {};
+	try {
+		const text = await request.text();
+		if (text) body = JSON.parse(text);
+	} catch { return { data: { error: 'Invalid JSON' }, code: 400 }; }
+
+	const resource = body.resource || 'ep3'; // default to ep3 (the only resource right now)
+	if (!RESOURCES[resource]) return { data: { error: `Unknown resource: ${resource}` }, code: 400 };
+
+	let email, supabaseUid;
+
+	if (adminEmail) {
+		// Admin path: email supplied in body
+		if (!body.email) return { data: { error: 'email required for admin grant' }, code: 400 };
+		email = body.email;
+		supabaseUid = null;
+	} else {
+		// Self-service path: resolve from JWT
+		const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+		const auth = await resolveJWTAuth(token, env);
+		if (!auth) return { data: { error: 'Not authenticated' }, code: 401 };
+		email       = auth.email;
+		supabaseUid = auth.supabaseUid || null;
+	}
+
+	const errors = await grantResourceAccess(email, resource, env, supabaseUid);
+	// Non-fatal errors (Supabase unreachable) don't block the response — access is in KV
+	const hadErrors = errors.length > 0;
+
+	// Return a signed download URL immediately so the client can fetch the resource in one call
+	const expiry = Math.floor(Date.now() / 1000) + RESOURCE_URL_TTL;
+	const sig = await signResourceUrl(resource, expiry, env);
+	const base = new URL(request.url).origin;
+	const downloadUrl = `${base}/resources/download?r=${encodeURIComponent(resource)}&exp=${expiry}&sig=${sig}`;
+
+	return {
+		data: {
+			ok:          true,
+			email,
+			resource,
+			downloadUrl,
+			expiresAt:   new Date(expiry * 1000).toISOString(),
+			...(hadErrors ? { warnings: errors } : {}),
+		},
+		code: 200,
+	};
+}
+
+// GET /resources/:resource  (Supabase JWT auth)
+async function handleResourceGet(request, resourceSlug, env) {
+	const meta = RESOURCES[resourceSlug];
+	if (!meta) return { data: { error: 'Resource not found' }, code: 404 };
+
+	const token = (request.headers.get('Authorization') || '').replace('Bearer ', '');
+	const auth = await resolveJWTAuth(token, env);
+	if (!auth) return { data: { error: 'Not authenticated' }, code: 401 };
+
+	const granted = await hasResourceAccess(auth.supabaseUid, auth.email, resourceSlug, env);
+	if (!granted) return { data: { error: 'Access not granted for this resource' }, code: 403 };
+
+	const expiry = Math.floor(Date.now() / 1000) + RESOURCE_URL_TTL;
+	const sig = await signResourceUrl(resourceSlug, expiry, env);
+	const base = new URL(request.url).origin;
+	const downloadUrl = `${base}/resources/download?r=${encodeURIComponent(resourceSlug)}&exp=${expiry}&sig=${sig}`;
+
+	return {
+		data: {
+			resource: resourceSlug,
+			name: meta.name,
+			filename: meta.filename,
+			downloadUrl,
+			expiresAt: new Date(expiry * 1000).toISOString(),
+		},
+		code: 200,
+	};
+}
+
+// GET /resources/download?r=<resource>&exp=<unix>&sig=<hmac>  (no auth — URL is the credential)
+async function handleResourceDownload(request, env) {
+	const url = new URL(request.url);
+	const resource = url.searchParams.get('r');
+	const expStr = url.searchParams.get('exp');
+	const sig = url.searchParams.get('sig');
+
+	if (!resource || !expStr || !sig) return new Response('Missing parameters', { status: 400 });
+
+	const meta = RESOURCES[resource];
+	if (!meta) return new Response('Unknown resource', { status: 404 });
+
+	const expiry = parseInt(expStr, 10);
+	if (isNaN(expiry) || Math.floor(Date.now() / 1000) > expiry) {
+		return new Response('Link expired', { status: 410 });
+	}
+
+	const valid = await verifyResourceSig(resource, expiry, sig, env);
+	if (!valid) return new Response('Invalid signature', { status: 403 });
+
+	if (!env.MEDIA_STORAGE) return new Response('Storage not configured', { status: 503 });
+	const obj = await env.MEDIA_STORAGE.get(meta.r2Key);
+	if (!obj) return new Response('File not found', { status: 404 });
+
+	const headers = new Headers();
+	headers.set('Content-Type', meta.mimeType);
+	headers.set('Content-Disposition', `attachment; filename="${meta.filename}"`);
+	headers.set('Cache-Control', 'private, no-store');
+	return new Response(obj.body, { status: 200, headers });
 }
 
 function slugify(text) {
