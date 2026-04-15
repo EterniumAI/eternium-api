@@ -169,6 +169,55 @@ async function verifyViaSupabaseApi(token, env) {
 	} catch { return null; }
 }
 
+// Unified request authentication middleware.
+// Extracts Bearer token or X-API-Key, resolves identity via API key lookup
+// or Supabase JWT verification, and returns a rich auth context.
+//
+// Returns: { userId, email, source, keyData } on success
+//          { error, code } on failure (401 = missing/invalid, 403 = revoked)
+//
+// validateApiKey must be passed in from worker.js (it lives there with KV access).
+export async function authenticateRequest(request, env, validateApiKey) {
+	const apiKey = request.headers.get('X-API-Key');
+	const authHeader = request.headers.get('Authorization') || '';
+	const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+	const token = apiKey || bearerToken;
+
+	if (!token) {
+		return { error: 'Authentication required. Pass API key via X-API-Key header, or Bearer token.', code: 401 };
+	}
+
+	// Try API key first (fast, KV lookup)
+	const keyData = await validateApiKey(token, env);
+	if (keyData) {
+		return {
+			userId: keyData.supabaseUid || null,
+			email: keyData.email,
+			source: 'api_key',
+			keyData,
+		};
+	}
+
+	// Try Supabase JWT
+	const jwtAuth = await resolveJWTAuth(token, env);
+	if (!jwtAuth) {
+		return { error: 'Invalid API key or token', code: 401 };
+	}
+
+	// Resolve JWT identity to KV user + API key data
+	const jwtKeyData = await resolveSupabaseUser(jwtAuth.email, jwtAuth.supabaseUid, env);
+	if (!jwtKeyData) {
+		return { error: 'Failed to resolve user account', code: 401 };
+	}
+
+	return {
+		userId: jwtAuth.supabaseUid || null,
+		email: jwtAuth.email,
+		source: 'supabase_jwt',
+		keyData: jwtKeyData,
+	};
+}
+
 // Resolve JWT auth — accepts Supabase HS256 (SUPABASE_JWT_SECRET), RS256 (JWKS),
 // and falls back to Supabase /auth/v1/user API call if both crypto paths fail.
 // Returns { email, source: 'supabase', supabaseUid } or null.
