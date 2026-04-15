@@ -39,6 +39,9 @@ import { syncMRR } from './lib/finance.js';
 import { runDailySOP } from './lib/daily-sop.js';
 import { handleResendWebhook, handleResendSync, handleResendDomains } from './lib/resend.js';
 import { handleCreditBalance, handleCreditDeduct, handleCreditAdd, handleCreditHistory } from './lib/credits.js';
+import {
+	queueWelcomeSequence, processEmailQueue,
+} from './lib/email.js';
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
@@ -1228,6 +1231,36 @@ export default {
 			return json(result.data || { error: result.error }, result.code, cors);
 		}
 
+		// ── New user webhook (Supabase database webhook on profiles INSERT) ──
+		// Configure in Supabase Dashboard > Database > Webhooks:
+		//   Table: public.profiles, Event: INSERT
+		//   URL: https://api.eternium.ai/webhooks/new-user
+		//   Header: Authorization: Bearer <WEBHOOK_SECRET>
+		if (url.pathname === '/webhooks/new-user' && request.method === 'POST') {
+			const secret = env.WEBHOOK_SECRET;
+			const incoming = (request.headers.get('Authorization') || '').replace('Bearer ', '');
+			if (secret && incoming !== secret) {
+				return json({ error: 'Unauthorized' }, 401, cors);
+			}
+			let body;
+			try { body = await request.json(); } catch { return json({ error: 'Invalid JSON' }, 400, cors); }
+
+			// Supabase webhook payload: { type: 'INSERT', table, record, schema }
+			const record = body.record || body;
+			const email = record.email || record.id; // profiles.id = auth.users.id (email may be on auth side)
+			const name = record.full_name || record.name || '';
+
+			if (!email || !email.includes('@')) {
+				return json({ error: 'No valid email in payload', payload: record }, 400, cors);
+			}
+
+			// Fire-and-forget queue insertion (don't block response)
+			const ctx = { waitUntil: (p) => p }; // minimal ExecutionContext shim if needed
+			queueWelcomeSequence(env, email, name).catch(() => {});
+
+			return json({ ok: true, queued: 5 }, 200, cors);
+		}
+
 		// ── Public Content API routes ────────────────────────────────
 		// These are publicly readable (no auth required)
 		if (url.pathname === '/v1/content/blog' && request.method === 'GET') {
@@ -1364,6 +1397,38 @@ export default {
 				const adminData = await validateApiKey(request.headers.get('X-API-Key') || '', env);
 				const result = await handleResourceGrant(request, env, adminData?.email || 'admin');
 				return json(result.data, result.code, cors);
+			}
+
+			// ── Email queue admin ────────────────────────────────────────
+			// POST /admin/email/process -- send due emails (run via cron or manually)
+			if (url.pathname === '/admin/email/process' && request.method === 'POST') {
+				const body = await request.json().catch(() => ({}));
+				const limit = Math.min(parseInt(body.limit ?? 50, 10), 200);
+				const result = await processEmailQueue(env, limit);
+				return json(result, result.ok ? 200 : 500, cors);
+			}
+
+			// GET /admin/email/queue -- peek at pending emails
+			if (url.pathname === '/admin/email/queue' && request.method === 'GET') {
+				if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+					return json({ error: 'Supabase not configured' }, 503, cors);
+				}
+				const status = url.searchParams.get('status') || 'pending';
+				const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '50', 10), 200);
+				const params = new URLSearchParams({
+					select: 'id,recipient_email,template_name,scheduled_for,status,sent_at,created_at',
+					status: `eq.${status}`,
+					order: 'scheduled_for.asc',
+					limit: String(limit),
+				});
+				const res = await fetch(`${env.SUPABASE_URL}/rest/v1/email_queue?${params}`, {
+					headers: {
+						'apikey': env.SUPABASE_SERVICE_KEY,
+						'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+					},
+				});
+				const data = await res.json().catch(() => []);
+				return json({ emails: data, count: data.length }, res.ok ? 200 : 500, cors);
 			}
 
 			// ── Armory product admin CRUD ────────────────────────────
