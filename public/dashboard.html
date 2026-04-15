@@ -1081,7 +1081,35 @@ window.addEventListener('DOMContentLoaded', () => {
     currentKey = saved;
     document.getElementById('api-key-input').value = saved;
     authenticate();
+    return;
   }
+
+  // Supabase auto-auth: provision key from existing session
+  const SUPABASE_URL = 'https://wmahfjguvqvefgjpbcdc.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_ZgilUeGnprKSwOAUGHiyYg_apkYouNQ';
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+  script.onload = async () => {
+    try {
+      const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) return;
+      const res = await fetch(window.location.origin + '/auth/provision-key', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + session.access_token,
+        },
+        body: JSON.stringify({ tier: 'free' }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      currentKey = data.api_key;
+      localStorage.setItem('etrn_key', currentKey);
+      authenticate();
+    } catch (e) { /* fall through to manual entry */ }
+  };
+  document.head.appendChild(script);
 });
 </script>
 </body>
