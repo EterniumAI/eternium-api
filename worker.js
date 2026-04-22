@@ -69,6 +69,7 @@ const KIE_COSTS = {
 	'nano-banana-2':    0.045,
 	'nano-banana-pro':  0.03,
 	'gpt-5.4-image':    0.05,
+	'gpt-image-2':      0.05,
 	'flux-kontext':     0.04,
 	'seedream-5':       0.03,
 	'qwen-image-2':     0.03,
@@ -165,6 +166,13 @@ const MODELS = {
 		description: 'OpenAI flagship image generation with exceptional prompt understanding',
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 14, featured: true,
+	},
+	'gpt-image-2': {
+		type: 'image', name: 'GPT Image 2', provider: 'OpenAI',
+		description: 'OpenAI flagship image model with near-perfect text rendering, multilingual generation, and pixel-level editing for inpaint and reference workflows',
+		defaults: { aspect_ratio: 'auto' },
+		credits_per_gen: 14, featured: true,
+		supports_editing: true,
 	},
 	'seedream-5': {
 		type: 'image', name: 'Seedream 5.0 Lite', provider: 'ByteDance',
@@ -735,6 +743,7 @@ function buildKieBody(model, prompt, params) {
 		'nano-banana-2':   'nano-banana-2',
 		'nano-banana-pro': 'nano-banana-pro',
 		'gpt-5.4-image':   'gpt-5.4/generate',
+		'gpt-image-2':     'gpt-image-2/generate',
 		'flux-kontext':    'flux-kontext/generate',
 		'seedream-5':      'seedream-5.0-lite/generate',
 		'qwen-image-2':    'qwen-image-2.0/generate',
@@ -804,6 +813,16 @@ async function handleGenerate(body, env, keyData) {
 		return { error: `Invalid model. Available: ${Object.keys(MODELS).join(', ')}`, code: 400 };
 	}
 	if (!prompt) return { error: 'prompt is required', code: 400 };
+
+	// Guard against oversized image_urls arrays (expensive upstream rejections)
+	if (model === 'gpt-image-2' && params.image_urls) {
+		if (!Array.isArray(params.image_urls) || !params.image_urls.every(u => typeof u === 'string')) {
+			return { error: 'invalid_request: image_urls must be an array of strings', code: 400 };
+		}
+		if (params.image_urls.length > 16) {
+			return { error: 'invalid_request: image_urls_too_many', code: 400 };
+		}
+	}
 
 	const credits = getGenerationCost(model, params, keyData.tier);
 

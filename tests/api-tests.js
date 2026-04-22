@@ -234,6 +234,48 @@ async function securityTests() {
     });
 }
 
+async function gptImage2Tests() {
+    console.log(`\n${BOLD}[GPT Image 2]${RESET}`);
+
+    await runTest('GET /v1/models includes gpt-image-2 with correct fields', async () => {
+        const { status, body } = await fetchApi('/v1/models');
+        assert(status === 200, `Expected 200, got ${status}`);
+        const model = body.models.find(m => m.id === 'gpt-image-2');
+        assert(model, 'Expected gpt-image-2 in models list');
+        assert(model.type === 'image', `Expected type "image", got "${model.type}"`);
+        assert(model.provider === 'OpenAI', `Expected provider "OpenAI", got "${model.provider}"`);
+        assert(model.supports_editing === true, `Expected supports_editing true, got ${model.supports_editing}`);
+    });
+
+    if (!TEST_KEY) {
+        console.log(`  ${YELLOW}WARNING${RESET} ETERNIUM_TEST_KEY not set -- skipping gpt-image-2 auth tests`);
+        for (let i = 0; i < 2; i++) skipTest('(requires ETERNIUM_TEST_KEY)');
+        return;
+    }
+
+    const authHeaders = { 'X-API-Key': TEST_KEY, 'Content-Type': 'application/json' };
+
+    await runTest('POST /v1/generate with gpt-image-2 returns taskId', async () => {
+        const { status, body } = await fetchApi('/v1/generate', {
+            method: 'POST', headers: authHeaders,
+            body: JSON.stringify({ model: 'gpt-image-2', prompt: 'a red apple on a white table' }),
+        });
+        assert(status === 200, `Expected 200, got ${status}. Body: ${JSON.stringify(body)}`);
+        assert(body.data && body.data.taskId, `Expected data.taskId, got ${JSON.stringify(body)}`);
+    });
+
+    await runTest('POST /v1/generate with gpt-image-2 rejects 17 image_urls', async () => {
+        const urls = Array.from({ length: 17 }, (_, i) => `https://example.com/img${i}.png`);
+        const { status, body } = await fetchApi('/v1/generate', {
+            method: 'POST', headers: authHeaders,
+            body: JSON.stringify({ model: 'gpt-image-2', prompt: 'test', image_urls: urls }),
+        });
+        assert(status === 400, `Expected 400, got ${status}`);
+        assert(body.error && body.error.includes('image_urls_too_many'),
+            `Expected image_urls_too_many error, got "${body.error}"`);
+    });
+}
+
 // ── Runner ─────────────────────────────────────────────────────
 
 async function main() {
@@ -247,6 +289,7 @@ async function main() {
     await authValidation();
     await errorHandling();
     await securityTests();
+    await gptImage2Tests();
 
     console.log(`\n${'='.repeat(50)}`);
     const total = passed + failed;
