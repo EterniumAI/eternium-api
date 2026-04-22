@@ -1119,6 +1119,29 @@ export default {
 			}
 		}
 
+		// ── Static frontend redirects ────────────────────────────────
+		// Redirect duplicate user-facing pages to their canonical
+		// eternium.ai equivalents (302 temporary). Admin panel stays.
+		if (!tenant) {
+			const REDIRECTS = {
+				'/':          'https://eternium.ai/api',
+				'/index':     'https://eternium.ai/api',
+				'/dashboard': 'https://eternium.ai/account',
+				'/signup':    'https://eternium.ai/signup',
+				'/login':     'https://eternium.ai/login',
+				'/docs':      'https://eternium.ai/api',
+				'/affiliate': 'https://eternium.ai/partners',
+			};
+			const rpath = url.pathname.toLowerCase().replace(/\.html$/, '');
+			const rTarget = REDIRECTS[rpath];
+			if (rTarget) {
+				return new Response(null, {
+					status: 302,
+					headers: { Location: rTarget, 'Cache-Control': 'no-cache' },
+				});
+			}
+		}
+
 		// ── Public routes ────────────────────────────────────────────
 
 		if (url.pathname === '/health') {
