@@ -1160,6 +1160,7 @@ export default {
 				id, type: m.type, name: m.name, provider: m.provider,
 				description: m.description, credits_per_gen: m.credits_per_gen,
 				featured: m.featured || false,
+				supports_editing: m.supports_editing || false,
 			}));
 			return json({ models, credit_value: CREDIT_VALUE }, 200, cors);
 		}
@@ -1170,6 +1171,7 @@ export default {
 				.map(([id, m]) => ({
 					id, type: m.type, name: m.name, provider: m.provider,
 					description: m.description, credits_per_gen: m.credits_per_gen,
+					supports_editing: m.supports_editing || false,
 				}));
 			return json({ models, credit_value: CREDIT_VALUE }, 200, cors);
 		}
