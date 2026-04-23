@@ -398,6 +398,28 @@ async function provisionKey(env, email, tier, name) {
 	return apiKey;
 }
 
+// ── Stripe Customer get-or-create ───────────────────────────────
+// Reusable helper: looks up stripeCustomerId on the user record,
+// creates a new Stripe Customer if absent, and persists the ID.
+export async function getOrCreateStripeCustomer(user, env) {
+	if (user.stripeCustomerId) {
+		return { customerId: user.stripeCustomerId };
+	}
+
+	const customer = await stripeRequest('POST', '/customers', {
+		email: user.email,
+		'metadata[eternium_email]': user.email,
+	}, env);
+
+	if (!customer || !customer.id) {
+		return { error: customer?.error?.message || 'Failed to create Stripe customer' };
+	}
+
+	user.stripeCustomerId = customer.id;
+	await saveUser(env, user);
+	return { customerId: customer.id };
+}
+
 // ── Route handlers ──────────────────────────────────────────────
 
 export async function handleCheckout(request, env) {
@@ -728,6 +750,95 @@ export async function inviteToGitHubRepo(env, repo, githubUsername) {
 	return { ...result, via: 'pat' };
 }
 
+// ── Billing Portal Session ───────────────────────────────────────
+export async function handleBillingPortal(request, env) {
+	const authHeader = request.headers.get('Authorization') || '';
+	const token = authHeader.replace('Bearer ', '');
+	const auth = await resolveJWTAuth(token, env);
+	if (!auth) return { error: 'Not authenticated', code: 401 };
+
+	const user = await getUser(env, auth.email);
+	if (!user) return { error: 'user_not_provisioned', code: 404 };
+
+	const { customerId, error: custErr } = await getOrCreateStripeCustomer(user, env);
+	if (custErr) return { error: 'stripe_error', details: custErr, code: 502 };
+
+	const session = await stripeRequest('POST', '/billing_portal/sessions', {
+		customer: customerId,
+		return_url: 'https://eternium.ai/account?tab=billing',
+	}, env);
+
+	if (!session || !session.url) {
+		return { error: 'stripe_error', details: session?.error?.message || 'Failed to create portal session', code: 502 };
+	}
+
+	return { data: { url: session.url }, code: 200 };
+}
+
+// ── Credit Top-up Checkout Session ──────────────────────────────
+export async function handleCreditTopup(request, env, topupPacks) {
+	const authHeader = request.headers.get('Authorization') || '';
+	const token = authHeader.replace('Bearer ', '');
+	const auth = await resolveJWTAuth(token, env);
+	if (!auth) return { error: 'Not authenticated', code: 401 };
+
+	let body;
+	try { body = await request.json(); }
+	catch { return { error: 'Invalid body', code: 400 }; }
+
+	const pack = body.pack;
+	if (!pack || !topupPacks[pack]) {
+		return { error: `Invalid pack. Valid: ${Object.keys(topupPacks).join(', ')}`, code: 400 };
+	}
+
+	const user = await ensureSupabaseUser(auth.email, auth.supabaseUid, env);
+	if (!user) return { error: 'user_not_provisioned', code: 404 };
+
+	const { customerId, error: custErr } = await getOrCreateStripeCustomer(user, env);
+	if (custErr) return { error: 'stripe_error', details: custErr, code: 502 };
+
+	const packData = topupPacks[pack];
+	const session = await stripeRequest('POST', '/checkout/sessions', {
+		customer: customerId,
+		mode: 'payment',
+		'payment_method_types[]': 'card',
+		'line_items[0][price]': packData.priceId,
+		'line_items[0][quantity]': '1',
+		success_url: 'https://eternium.ai/account?tab=billing&topup=success',
+		cancel_url: 'https://eternium.ai/account?tab=billing&topup=cancelled',
+		'metadata[kind]': 'credit_topup',
+		'metadata[pack]': pack,
+		'metadata[credits]': String(packData.credits),
+		'metadata[eternium_email]': auth.email,
+	}, env);
+
+	if (!session || !session.url) {
+		return { error: 'stripe_error', details: session?.error?.message || 'Failed to create checkout session', code: 502 };
+	}
+
+	return { data: { checkout_url: session.url }, code: 200 };
+}
+
+// ── Transaction History ─────────────────────────────────────────
+export async function handleCreditTransactions(env, keyData) {
+	const email = keyData.email;
+	let transactions = [];
+
+	// Defensive read: TRANSACTIONS binding may not be provisioned yet
+	if (env.TRANSACTIONS) {
+		try {
+			const data = await env.TRANSACTIONS.get(`txn:${email}`, 'json');
+			if (Array.isArray(data)) transactions = data;
+		} catch { /* binding missing or read error */ }
+	}
+
+	// Return last 50, newest first (already stored newest-first)
+	return {
+		data: { transactions: transactions.slice(0, 50) },
+		code: 200,
+	};
+}
+
 export async function handleStripeWebhook(request, env) {
 	const body = await request.text();
 	const sig = request.headers.get('stripe-signature');
@@ -801,6 +912,72 @@ export async function handleStripeWebhook(request, env) {
 				});
 				const result = await handleProvisionTenant(fakeRequest, env);
 				console.log(`[Hosting] Provisioned ${slug}: ${result.data ? 'OK' : result.error}`);
+				break;
+			}
+
+			// ── Credit top-up purchase (Surface 4 billing flow) ──
+			if (session.metadata?.kind === 'credit_topup') {
+				const topupEmail = session.metadata.eternium_email;
+				const topupCredits = parseInt(session.metadata.credits, 10);
+				const topupPack = session.metadata.pack;
+
+				if (topupEmail && topupCredits > 0) {
+					// Idempotency: check if this session was already processed
+					let existingTxns = [];
+					if (env.TRANSACTIONS) {
+						try {
+							existingTxns = (await env.TRANSACTIONS.get(`txn:${topupEmail}`, 'json')) || [];
+						} catch { /* ok */ }
+					}
+					const alreadyProcessed = existingTxns.some(t => t.stripe_session_id === session.id);
+
+					if (!alreadyProcessed) {
+						// Credit the purchased balance via Supabase (consistent with existing flow)
+						if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
+							const profileRes = await fetch(
+								`${env.SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(topupEmail)}&select=api_credit_balance`,
+								{ headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
+							);
+							const profiles = await profileRes.json().catch(() => []);
+							const currentBalance = profiles?.[0]?.api_credit_balance || 0;
+							await fetch(
+								`${env.SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(topupEmail)}`,
+								{
+									method: 'PATCH',
+									headers: {
+										'apikey': env.SUPABASE_SERVICE_KEY,
+										'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+										'Content-Type': 'application/json',
+										'Prefer': 'return=minimal',
+									},
+									body: JSON.stringify({ api_credit_balance: currentBalance + topupCredits }),
+								}
+							);
+							console.log(`[TopUp] Pack "${topupPack}" +${topupCredits} credits for ${topupEmail} (balance: ${currentBalance} -> ${currentBalance + topupCredits})`);
+						}
+
+						// Append transaction record to TRANSACTIONS KV
+						if (env.TRANSACTIONS) {
+							const txn = {
+								ts: Date.now(),
+								kind: 'topup',
+								credits: topupCredits,
+								amount_cents: session.amount_total || 0,
+								stripe_session_id: session.id,
+								stripe_payment_intent: session.payment_intent || null,
+								invoice_url: null,
+							};
+							existingTxns.unshift(txn);
+							try {
+								await env.TRANSACTIONS.put(`txn:${topupEmail}`, JSON.stringify(existingTxns));
+							} catch (err) {
+								console.log(`[TopUp] Failed to write TRANSACTIONS KV: ${err.message}`);
+							}
+						}
+					} else {
+						console.log(`[TopUp] Skipping duplicate session ${session.id} for ${topupEmail}`);
+					}
+				}
 				break;
 			}
 

@@ -22,6 +22,7 @@
 import {
 	handleCheckout, handleProvisionKey, handleRegenerateKey,
 	handleStripeSuccess, handleStripeWebhook,
+	handleBillingPortal, handleCreditTopup, handleCreditTransactions,
 	handleAdminOverview, handleAdminRevoke, handleAdminActivate, handleAdminTestInvite,
 	resolveJWTAuth, resolveSupabaseUser, authenticateRequest,
 } from './auth.js';
@@ -46,6 +47,16 @@ import {
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
 const CREDIT_VALUE = 0.005; // 1 credit = $0.005 — half a penny (200 credits per dollar)
+
+// ── Credit Top-up Packs (Surface 4 billing) ─────────────────────
+// Price IDs are placeholders until Ty provides live IDs from Stripe Dashboard.
+// 1 credit = $0.005 (200 credits/$1). Bonus credits at $500+ tiers.
+const TOPUP_PACKS = {
+	starter:    { priceId: 'price_PLACEHOLDER_topup_starter',    dollars: 5,    credits: 1000,   bonus: 0,     display: '1,000' },
+	pro:        { priceId: 'price_PLACEHOLDER_topup_pro',        dollars: 50,   credits: 10000,  bonus: 0,     display: '10,000' },
+	scale:      { priceId: 'price_PLACEHOLDER_topup_scale',      dollars: 500,  credits: 105000, bonus: 5000,  display: '105,000 (SAVE 5%)' },
+	enterprise: { priceId: 'price_PLACEHOLDER_topup_enterprise', dollars: 1250, credits: 275000, bonus: 25000, display: '275,000 (SAVE 10%)' },
+};
 
 // CORS: Open to all origins. Security is enforced by API key authentication,
 // not by origin restrictions. Every major API (OpenAI, Stripe, Twilio) does this.
@@ -1258,6 +1269,14 @@ export default {
 			const result = await handleRegenerateKey(request, env);
 			return json(result.data || { error: result.error }, result.code, cors);
 		}
+		if (url.pathname === '/auth/billing-portal' && request.method === 'POST') {
+			const result = await handleBillingPortal(request, env);
+			return json(result.data || { error: result.error, details: result.details }, result.code, cors);
+		}
+		if (url.pathname === '/v1/credits/topup' && request.method === 'POST') {
+			const result = await handleCreditTopup(request, env, TOPUP_PACKS);
+			return json(result.data || { error: result.error, details: result.details }, result.code, cors);
+		}
 		if (url.pathname === '/auth/stripe-success' && request.method === 'GET') {
 			const result = await handleStripeSuccess(request, env);
 			return json(result.data || { error: result.error }, result.code, cors);
@@ -1650,6 +1669,12 @@ export default {
 		// GET /v1/credits/history
 		if (url.pathname === '/v1/credits/history' && request.method === 'GET') {
 			const result = await handleCreditHistory(env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// GET /v1/credits/transactions (Surface 4 billing transaction log)
+		if (url.pathname === '/v1/credits/transactions' && request.method === 'GET') {
+			const result = await handleCreditTransactions(env, keyData);
 			return json(result.data, result.code, headers);
 		}
 
