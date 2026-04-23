@@ -775,68 +775,82 @@ export async function handleBillingPortal(request, env) {
 	return { data: { url: session.url }, code: 200 };
 }
 
-// ── Credit Top-up Checkout Session ──────────────────────────────
-export async function handleCreditTopup(request, env, topupPacks) {
-	const authHeader = request.headers.get('Authorization') || '';
-	const token = authHeader.replace('Bearer ', '');
-	const auth = await resolveJWTAuth(token, env);
-	if (!auth) return { error: 'Not authenticated', code: 401 };
-
-	let body;
-	try { body = await request.json(); }
-	catch { return { error: 'Invalid body', code: 400 }; }
-
-	const pack = body.pack;
-	if (!pack || !topupPacks[pack]) {
-		return { error: `Invalid pack. Valid: ${Object.keys(topupPacks).join(', ')}`, code: 400 };
-	}
-
-	const user = await ensureSupabaseUser(auth.email, auth.supabaseUid, env);
-	if (!user) return { error: 'user_not_provisioned', code: 404 };
-
-	const { customerId, error: custErr } = await getOrCreateStripeCustomer(user, env);
-	if (custErr) return { error: 'stripe_error', details: custErr, code: 502 };
-
-	const packData = topupPacks[pack];
-	const session = await stripeRequest('POST', '/checkout/sessions', {
-		customer: customerId,
-		mode: 'payment',
-		'payment_method_types[]': 'card',
-		'line_items[0][price]': packData.priceId,
-		'line_items[0][quantity]': '1',
-		success_url: 'https://eternium.ai/account?tab=billing&topup=success',
-		cancel_url: 'https://eternium.ai/account?tab=billing&topup=cancelled',
-		'metadata[kind]': 'credit_topup',
-		'metadata[pack]': pack,
-		'metadata[credits]': String(packData.credits),
-		'metadata[eternium_email]': auth.email,
-	}, env);
-
-	if (!session || !session.url) {
-		return { error: 'stripe_error', details: session?.error?.message || 'Failed to create checkout session', code: 502 };
-	}
-
-	return { data: { checkout_url: session.url }, code: 200 };
-}
-
-// ── Transaction History ─────────────────────────────────────────
+// ── Transaction History (live from Stripe) ──────────────────────
 export async function handleCreditTransactions(env, keyData) {
 	const email = keyData.email;
-	let transactions = [];
-
-	// Defensive read: TRANSACTIONS binding may not be provisioned yet
-	if (env.TRANSACTIONS) {
-		try {
-			const data = await env.TRANSACTIONS.get(`txn:${email}`, 'json');
-			if (Array.isArray(data)) transactions = data;
-		} catch { /* binding missing or read error */ }
+	const user = await getUser(env, email);
+	if (!user || !user.stripeCustomerId) {
+		return { data: { transactions: [] }, code: 200 };
 	}
 
-	// Return last 50, newest first (already stored newest-first)
-	return {
-		data: { transactions: transactions.slice(0, 50) },
-		code: 200,
+	const customerId = user.stripeCustomerId;
+	const stripeHeaders = {
+		'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}`,
 	};
+
+	// Fetch invoices and payment intents in parallel
+	const [invoicesRes, pisRes] = await Promise.all([
+		fetch(`https://api.stripe.com/v1/invoices?customer=${customerId}&limit=50&expand[]=data.payment_intent`, {
+			headers: stripeHeaders,
+		}),
+		fetch(`https://api.stripe.com/v1/payment_intents?customer=${customerId}&limit=50`, {
+			headers: stripeHeaders,
+		}),
+	]);
+
+	const invoicesData = await invoicesRes.json().catch(() => ({}));
+	const pisData = await pisRes.json().catch(() => ({}));
+
+	const transactions = [];
+	const seenTimestamps = new Set();
+
+	// Map invoices
+	if (Array.isArray(invoicesData.data)) {
+		for (const inv of invoicesData.data) {
+			const ts = inv.created * 1000;
+			seenTimestamps.add(ts);
+			const lineItem = inv.lines?.data?.[0];
+			transactions.push({
+				ts,
+				kind: inv.subscription ? 'subscription' : 'topup',
+				credits: lineItem?.metadata?.credits ? parseInt(lineItem.metadata.credits, 10) : null,
+				amount_cents: inv.amount_paid,
+				currency: inv.currency,
+				description: lineItem?.description || null,
+				stripe_invoice_id: inv.id,
+				invoice_url: inv.hosted_invoice_url || null,
+				invoice_pdf: inv.invoice_pdf || null,
+				status: inv.status,
+			});
+		}
+	}
+
+	// Merge payment intents not covered by invoices (one-time checkout sessions)
+	if (Array.isArray(pisData.data)) {
+		for (const pi of pisData.data) {
+			const ts = pi.created * 1000;
+			if (seenTimestamps.has(ts)) continue;
+			// Only include succeeded payments
+			if (pi.status !== 'succeeded') continue;
+			transactions.push({
+				ts,
+				kind: 'topup',
+				credits: pi.metadata?.credits ? parseInt(pi.metadata.credits, 10) : null,
+				amount_cents: pi.amount_received || pi.amount,
+				currency: pi.currency,
+				description: pi.description || pi.metadata?.pack || 'Credit top-up',
+				stripe_invoice_id: null,
+				invoice_url: null,
+				invoice_pdf: null,
+				status: pi.status,
+			});
+		}
+	}
+
+	// Sort newest first
+	transactions.sort((a, b) => b.ts - a.ts);
+
+	return { data: { transactions }, code: 200 };
 }
 
 export async function handleStripeWebhook(request, env) {
@@ -912,72 +926,6 @@ export async function handleStripeWebhook(request, env) {
 				});
 				const result = await handleProvisionTenant(fakeRequest, env);
 				console.log(`[Hosting] Provisioned ${slug}: ${result.data ? 'OK' : result.error}`);
-				break;
-			}
-
-			// ── Credit top-up purchase (Surface 4 billing flow) ──
-			if (session.metadata?.kind === 'credit_topup') {
-				const topupEmail = session.metadata.eternium_email;
-				const topupCredits = parseInt(session.metadata.credits, 10);
-				const topupPack = session.metadata.pack;
-
-				if (topupEmail && topupCredits > 0) {
-					// Idempotency: check if this session was already processed
-					let existingTxns = [];
-					if (env.TRANSACTIONS) {
-						try {
-							existingTxns = (await env.TRANSACTIONS.get(`txn:${topupEmail}`, 'json')) || [];
-						} catch { /* ok */ }
-					}
-					const alreadyProcessed = existingTxns.some(t => t.stripe_session_id === session.id);
-
-					if (!alreadyProcessed) {
-						// Credit the purchased balance via Supabase (consistent with existing flow)
-						if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
-							const profileRes = await fetch(
-								`${env.SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(topupEmail)}&select=api_credit_balance`,
-								{ headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` } }
-							);
-							const profiles = await profileRes.json().catch(() => []);
-							const currentBalance = profiles?.[0]?.api_credit_balance || 0;
-							await fetch(
-								`${env.SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(topupEmail)}`,
-								{
-									method: 'PATCH',
-									headers: {
-										'apikey': env.SUPABASE_SERVICE_KEY,
-										'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-										'Content-Type': 'application/json',
-										'Prefer': 'return=minimal',
-									},
-									body: JSON.stringify({ api_credit_balance: currentBalance + topupCredits }),
-								}
-							);
-							console.log(`[TopUp] Pack "${topupPack}" +${topupCredits} credits for ${topupEmail} (balance: ${currentBalance} -> ${currentBalance + topupCredits})`);
-						}
-
-						// Append transaction record to TRANSACTIONS KV
-						if (env.TRANSACTIONS) {
-							const txn = {
-								ts: Date.now(),
-								kind: 'topup',
-								credits: topupCredits,
-								amount_cents: session.amount_total || 0,
-								stripe_session_id: session.id,
-								stripe_payment_intent: session.payment_intent || null,
-								invoice_url: null,
-							};
-							existingTxns.unshift(txn);
-							try {
-								await env.TRANSACTIONS.put(`txn:${topupEmail}`, JSON.stringify(existingTxns));
-							} catch (err) {
-								console.log(`[TopUp] Failed to write TRANSACTIONS KV: ${err.message}`);
-							}
-						}
-					} else {
-						console.log(`[TopUp] Skipping duplicate session ${session.id} for ${topupEmail}`);
-					}
-				}
 				break;
 			}
 
