@@ -22,6 +22,7 @@
 import {
 	handleCheckout, handleProvisionKey, handleRegenerateKey,
 	handleStripeSuccess, handleStripeWebhook,
+	handleBillingPortal, handleCreditTransactions,
 	handleAdminOverview, handleAdminRevoke, handleAdminActivate, handleAdminTestInvite,
 	resolveJWTAuth, resolveSupabaseUser, authenticateRequest,
 } from './auth.js';
@@ -1258,6 +1259,10 @@ export default {
 			const result = await handleRegenerateKey(request, env);
 			return json(result.data || { error: result.error }, result.code, cors);
 		}
+		if (url.pathname === '/auth/billing-portal' && request.method === 'POST') {
+			const result = await handleBillingPortal(request, env);
+			return json(result.data || { error: result.error, details: result.details }, result.code, cors);
+		}
 		if (url.pathname === '/auth/stripe-success' && request.method === 'GET') {
 			const result = await handleStripeSuccess(request, env);
 			return json(result.data || { error: result.error }, result.code, cors);
@@ -1650,6 +1655,12 @@ export default {
 		// GET /v1/credits/history
 		if (url.pathname === '/v1/credits/history' && request.method === 'GET') {
 			const result = await handleCreditHistory(env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// GET /v1/credits/transactions (Surface 4 billing transaction log)
+		if (url.pathname === '/v1/credits/transactions' && request.method === 'GET') {
+			const result = await handleCreditTransactions(env, keyData);
 			return json(result.data, result.code, headers);
 		}
 

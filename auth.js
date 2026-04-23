@@ -398,6 +398,28 @@ async function provisionKey(env, email, tier, name) {
 	return apiKey;
 }
 
+// ── Stripe Customer get-or-create ───────────────────────────────
+// Reusable helper: looks up stripeCustomerId on the user record,
+// creates a new Stripe Customer if absent, and persists the ID.
+export async function getOrCreateStripeCustomer(user, env) {
+	if (user.stripeCustomerId) {
+		return { customerId: user.stripeCustomerId };
+	}
+
+	const customer = await stripeRequest('POST', '/customers', {
+		email: user.email,
+		'metadata[eternium_email]': user.email,
+	}, env);
+
+	if (!customer || !customer.id) {
+		return { error: customer?.error?.message || 'Failed to create Stripe customer' };
+	}
+
+	user.stripeCustomerId = customer.id;
+	await saveUser(env, user);
+	return { customerId: customer.id };
+}
+
 // ── Route handlers ──────────────────────────────────────────────
 
 export async function handleCheckout(request, env) {
@@ -726,6 +748,109 @@ export async function inviteToGitHubRepo(env, repo, githubUsername) {
 	const result = await inviteViaToken(env.GITHUB_PAT, repo, githubUsername);
 	if (result.ok) console.log(`[GitHub] invite via PAT fallback: ${repo} -> ${githubUsername} (${result.status})`);
 	return { ...result, via: 'pat' };
+}
+
+// ── Billing Portal Session ───────────────────────────────────────
+export async function handleBillingPortal(request, env) {
+	const authHeader = request.headers.get('Authorization') || '';
+	const token = authHeader.replace('Bearer ', '');
+	const auth = await resolveJWTAuth(token, env);
+	if (!auth) return { error: 'Not authenticated', code: 401 };
+
+	const user = await getUser(env, auth.email);
+	if (!user) return { error: 'user_not_provisioned', code: 404 };
+
+	const { customerId, error: custErr } = await getOrCreateStripeCustomer(user, env);
+	if (custErr) return { error: 'stripe_error', details: custErr, code: 502 };
+
+	const session = await stripeRequest('POST', '/billing_portal/sessions', {
+		customer: customerId,
+		return_url: 'https://eternium.ai/account?tab=billing',
+	}, env);
+
+	if (!session || !session.url) {
+		return { error: 'stripe_error', details: session?.error?.message || 'Failed to create portal session', code: 502 };
+	}
+
+	return { data: { url: session.url }, code: 200 };
+}
+
+// ── Transaction History (live from Stripe) ──────────────────────
+export async function handleCreditTransactions(env, keyData) {
+	const email = keyData.email;
+	const user = await getUser(env, email);
+	if (!user || !user.stripeCustomerId) {
+		return { data: { transactions: [] }, code: 200 };
+	}
+
+	const customerId = user.stripeCustomerId;
+	const stripeHeaders = {
+		'Authorization': `Bearer ${env.STRIPE_SECRET_KEY}`,
+	};
+
+	// Fetch invoices and payment intents in parallel
+	const [invoicesRes, pisRes] = await Promise.all([
+		fetch(`https://api.stripe.com/v1/invoices?customer=${customerId}&limit=50&expand[]=data.payment_intent`, {
+			headers: stripeHeaders,
+		}),
+		fetch(`https://api.stripe.com/v1/payment_intents?customer=${customerId}&limit=50`, {
+			headers: stripeHeaders,
+		}),
+	]);
+
+	const invoicesData = await invoicesRes.json().catch(() => ({}));
+	const pisData = await pisRes.json().catch(() => ({}));
+
+	const transactions = [];
+	const seenTimestamps = new Set();
+
+	// Map invoices
+	if (Array.isArray(invoicesData.data)) {
+		for (const inv of invoicesData.data) {
+			const ts = inv.created * 1000;
+			seenTimestamps.add(ts);
+			const lineItem = inv.lines?.data?.[0];
+			transactions.push({
+				ts,
+				kind: inv.subscription ? 'subscription' : 'topup',
+				credits: lineItem?.metadata?.credits ? parseInt(lineItem.metadata.credits, 10) : null,
+				amount_cents: inv.amount_paid,
+				currency: inv.currency,
+				description: lineItem?.description || null,
+				stripe_invoice_id: inv.id,
+				invoice_url: inv.hosted_invoice_url || null,
+				invoice_pdf: inv.invoice_pdf || null,
+				status: inv.status,
+			});
+		}
+	}
+
+	// Merge payment intents not covered by invoices (one-time checkout sessions)
+	if (Array.isArray(pisData.data)) {
+		for (const pi of pisData.data) {
+			const ts = pi.created * 1000;
+			if (seenTimestamps.has(ts)) continue;
+			// Only include succeeded payments
+			if (pi.status !== 'succeeded') continue;
+			transactions.push({
+				ts,
+				kind: 'topup',
+				credits: pi.metadata?.credits ? parseInt(pi.metadata.credits, 10) : null,
+				amount_cents: pi.amount_received || pi.amount,
+				currency: pi.currency,
+				description: pi.description || pi.metadata?.pack || 'Credit top-up',
+				stripe_invoice_id: null,
+				invoice_url: null,
+				invoice_pdf: null,
+				status: pi.status,
+			});
+		}
+	}
+
+	// Sort newest first
+	transactions.sort((a, b) => b.ts - a.ts);
+
+	return { data: { transactions }, code: 200 };
 }
 
 export async function handleStripeWebhook(request, env) {
