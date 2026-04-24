@@ -44,6 +44,11 @@ import {
 	queueWelcomeSequence, processEmailQueue,
 } from './lib/email.js';
 import { handleAdCommanderDraft } from './lib/ad-commander-copy.js';
+import {
+	handleCreateCreative, handleAutofillCopy, handlePatchCreative,
+	handleReviewCreative, handlePublishCreative, handleGetActionLog,
+	handleGetMetrics, handleListCreatives,
+} from './lib/ad-commander.js';
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
@@ -1915,6 +1920,76 @@ export default {
 			catch { return json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, 400, headers); }
 			const result = await handleAdCommanderDraft(body, env, keyData);
 			return json(result.data || { error: result.error }, result.code, headers);
+		}
+
+		// POST /v1/ad-commander/creatives -- create a draft creative
+		if (url.pathname === '/v1/ad-commander/creatives' && request.method === 'POST') {
+			let body;
+			try { body = await request.json(); }
+			catch { return json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, 400, headers); }
+			const result = await handleCreateCreative(body, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// POST /v1/ad-commander/creatives/:id/autofill-copy
+		const autofillMatch = url.pathname.match(/^\/v1\/ad-commander\/creatives\/([^/]+)\/autofill-copy$/);
+		if (autofillMatch && request.method === 'POST') {
+			let body;
+			try { body = await request.json(); }
+			catch { return json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, 400, headers); }
+			const result = await handleAutofillCopy(autofillMatch[1], body, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// POST /v1/ad-commander/creatives/:id/review
+		const reviewMatch = url.pathname.match(/^\/v1\/ad-commander\/creatives\/([^/]+)\/review$/);
+		if (reviewMatch && request.method === 'POST') {
+			let body;
+			try { body = await request.json(); }
+			catch { return json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, 400, headers); }
+			const result = await handleReviewCreative(reviewMatch[1], body, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// POST /v1/ad-commander/creatives/:id/publish
+		const publishMatch = url.pathname.match(/^\/v1\/ad-commander\/creatives\/([^/]+)\/publish$/);
+		if (publishMatch && request.method === 'POST') {
+			let body;
+			try { body = await request.json(); }
+			catch { return json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, 400, headers); }
+			const result = await handlePublishCreative(publishMatch[1], body, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// PATCH /v1/ad-commander/creatives/:id
+		const patchCreativeMatch = url.pathname.match(/^\/v1\/ad-commander\/creatives\/([^/]+)$/);
+		if (patchCreativeMatch && request.method === 'PATCH') {
+			let body;
+			try { body = await request.json(); }
+			catch { return json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, 400, headers); }
+			const result = await handlePatchCreative(patchCreativeMatch[1], body, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// GET /v1/ad-commander/action-logs/:id
+		const actionLogMatch = url.pathname.match(/^\/v1\/ad-commander\/action-logs\/([^/]+)$/);
+		if (actionLogMatch && request.method === 'GET') {
+			const result = await handleGetActionLog(actionLogMatch[1], env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// GET /v1/ad-commander/projects/:project_id/ad-accounts/:ads_account_id/metrics
+		const metricsMatch = url.pathname.match(/^\/v1\/ad-commander\/projects\/([^/]+)\/ad-accounts\/([^/]+)\/metrics$/);
+		if (metricsMatch && request.method === 'GET') {
+			const result = await handleGetMetrics(metricsMatch[1], metricsMatch[2], url.searchParams, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// GET /v1/ad-commander/projects/:project_id/ad-accounts/:ads_account_id/creatives
+		const listCreativesMatch = url.pathname.match(/^\/v1\/ad-commander\/projects\/([^/]+)\/ad-accounts\/([^/]+)\/creatives$/);
+		if (listCreativesMatch && request.method === 'GET') {
+			const result = await handleListCreatives(listCreativesMatch[1], listCreativesMatch[2], url.searchParams, env, keyData);
+			return json(result.data, result.code, headers);
 		}
 
 		return json({ error: 'Not found' }, 404, headers);

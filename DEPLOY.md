@@ -168,6 +168,25 @@ These HTML pages should be served via Cloudflare Pages or as worker routes:
 - [ ] Review cache hit rate — high rate = happy agents
 - [ ] If Kie.ai costs > 80% of MRR, adjust pricing or restrict free tier
 
+## Ad Commander endpoints
+
+All endpoints require API key auth. Tenant scoping enforced via `assertAdCommanderAccess`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/ad-commander/creatives` | Create a draft creative |
+| POST | `/v1/ad-commander/creatives/:id/autofill-copy` | Generate 3 copy variants, apply first to creative |
+| PATCH | `/v1/ad-commander/creatives/:id` | Edit creative fields (draft/pending_review only) |
+| POST | `/v1/ad-commander/creatives/:id/review` | Transition workflow status |
+| POST | `/v1/ad-commander/creatives/:id/publish` | Push approved creative to Meta (501 until op-4) |
+| GET | `/v1/ad-commander/action-logs/:id` | Read a single audit log entry |
+| GET | `/v1/ad-commander/projects/:pid/ad-accounts/:aid/metrics?days=14` | Aggregated insights |
+| GET | `/v1/ad-commander/projects/:pid/ad-accounts/:aid/creatives?status=` | List creatives |
+
+Workflow status transitions: draft -> pending_review -> approved -> archived. Any status -> failed (requires review_notes).
+
+Publish endpoint returns 501 with `code: PUBLISH_NOT_WIRED` until the op-4 write-library is deployed.
+
 ## Next Steps
 
 - [ ] Publish JS SDK: `cd sdk/js && npm publish`
