@@ -96,9 +96,15 @@ const OPENAI_COSTS = {
 	'whisper-1':           { perMinute: 0.006 },
 };
 
+// ── ElevenLabs Conversational AI base costs (USD per minute) ──────
+// Managed agent pricing — applies to voice/session + post-call webhook billing.
+const ELEVENLABS_COSTS = {
+	'elevenlabs-conv': { perMinute: 0.12 },
+};
+
 // ── Markup multipliers ──────────────────────────────────────────
-const MARKUP = { image: 1.35, video: 1.40, chat: 1.30, embedding: 1.35, audio: 1.30 };
-const PARTNER_MARKUP = 1.18; // flat 18% across all types for partner-tier clients
+const MARKUP = { image: 1.35, video: 1.40, chat: 1.30, embedding: 1.35, audio: 1.30, voice: 1.30 };
+const PARTNER_MARKUP = 1.18; // flat 18% across all types for partner-tier clients (LaMarnie)
 
 // ── Cost → credits (returns integer) ────────────────────────────
 function getGenerationCost(model, params = {}, keyTier = null) {
@@ -118,6 +124,18 @@ function getGenerationCost(model, params = {}, keyTier = null) {
 	const raw = tier[duration] || tier[Object.keys(tier)[0]];
 	const usd = raw * (mul ?? MARKUP.video);
 	return Math.ceil(usd / CREDIT_VALUE);
+}
+
+// ── Voice (ElevenLabs Conversational AI) cost → credits ────────
+function getVoiceCost(model, seconds, keyTier = null) {
+	const costs = ELEVENLABS_COSTS[model];
+	if (!costs || !costs.perMinute) return 0;
+	const minutes = Math.max(seconds, 0) / 60;
+	const usd = costs.perMinute * minutes;
+	const mul = keyTier === 'internal' ? 1
+		: keyTier === 'partner' ? PARTNER_MARKUP
+		: MARKUP.voice;
+	return Math.max(1, Math.ceil((usd * mul) / CREDIT_VALUE));
 }
 
 // ── Chat/embedding/audio cost → credits ─────────────────────────
@@ -161,12 +179,14 @@ const MODELS = {
 		description: 'Latest Gemini image model with sharper 2K output, improved text rendering, and character consistency',
 		defaults: { aspect_ratio: '1:1', resolution: '2K', output_format: 'png' },
 		credits_per_gen: 12, featured: true,
+		max_reference_images: 3,
 	},
 	'gpt-5.4-image': {
 		type: 'image', name: 'GPT-5.4 Image', provider: 'OpenAI',
 		description: 'OpenAI flagship image generation with exceptional prompt understanding',
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 14, featured: true,
+		max_reference_images: 8,
 	},
 	'gpt-image-2': {
 		type: 'image', name: 'GPT Image 2', provider: 'OpenAI',
@@ -174,36 +194,42 @@ const MODELS = {
 		defaults: { aspect_ratio: 'auto' },
 		credits_per_gen: 14, featured: true,
 		supports_editing: true,
+		max_reference_images: 16,
 	},
 	'seedream-5': {
 		type: 'image', name: 'Seedream 5.0 Lite', provider: 'ByteDance',
 		description: 'ByteDance image model with up to 4K output and fast generation',
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 8, featured: true,
+		max_reference_images: 4,
 	},
 	'nano-banana-pro': {
 		type: 'image', name: 'Nano Banana Pro', provider: 'Google',
 		description: 'Fast, precise AI image generation with native 4K output',
 		defaults: { aspect_ratio: '1:1', resolution: '1K', output_format: 'png' },
 		credits_per_gen: 8,
+		max_reference_images: 3,
 	},
 	'flux-kontext': {
 		type: 'image', name: 'Flux Kontext', provider: 'Black Forest Labs',
 		description: 'Advanced image generation and editing with reference images',
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 11,
+		max_reference_images: 4,
 	},
 	'qwen-image-2': {
 		type: 'image', name: 'Qwen Image 2.0', provider: 'Qwen',
 		description: 'Qwen image generation with strong text rendering',
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 8,
+		max_reference_images: 4,
 	},
 	'midjourney': {
 		type: 'image', name: 'Midjourney', provider: 'Midjourney',
 		description: 'Midjourney v6 via API — 4 variants per generation',
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 11,
+		max_reference_images: 2,
 	},
 
 	// ── Video ── Featured first ──
@@ -291,6 +317,13 @@ const MODELS = {
 		type: 'audio', name: 'Whisper', provider: 'OpenAI',
 		description: 'Speech-to-text transcription with multi-language support',
 		pricing: { per_minute: 0.006 },
+	},
+
+	// ── Voice Models ──
+	'elevenlabs-conv': {
+		type: 'voice', name: 'ElevenLabs Conversational AI', provider: 'ElevenLabs',
+		description: 'Real-time voice conversation agent with custom voice + tool calling',
+		pricing: { per_minute: 0.12 },
 	},
 };
 
@@ -1085,6 +1118,162 @@ async function handleUsage(env, keyData) {
 	};
 }
 
+// ── Voice (ElevenLabs Conversational AI) ───────────────────────
+//
+// Token-broker pattern: we issue short-lived signed URLs so the mobile client
+// can connect directly to ElevenLabs' WebRTC endpoint — zero added audio-path
+// latency. Usage is metered post-call via ElevenLabs' conversation.finished
+// webhook, with the partner markup (18% for LaMarnie) applied by the credit
+// system (getVoiceCost → PARTNER_MARKUP when keyTier === 'partner').
+
+async function handleVoiceSession(body, env, keyData) {
+	if (!env.ELEVENLABS_API_KEY) {
+		return { error: 'voice_unavailable: ELEVENLABS_API_KEY not configured', code: 503 };
+	}
+	const agentId = body.agent_id || env.ELEVENLABS_AGENT_ID_LAMARNIE;
+	if (!agentId) {
+		return { error: 'invalid_request: agent_id is required', code: 400 };
+	}
+
+	// Pre-flight budget check — reserve a nominal 30s so runaway calls can't
+	// start when the user has no credits left. Real debit happens post-call.
+	const reserved = getVoiceCost('elevenlabs-conv', 30, keyData.tier);
+	const budget = await checkBudget(env, keyData.key, keyData.tier, reserved);
+	if (!budget.allowed) {
+		return {
+			error: 'Monthly credit limit reached. Upgrade your tier or wait for reset.',
+			code: 402,
+			usage: { spent: budget.spent, limit: budget.limit },
+		};
+	}
+
+	try {
+		const res = await fetch(
+			`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${encodeURIComponent(agentId)}`,
+			{ headers: { 'xi-api-key': env.ELEVENLABS_API_KEY } }
+		);
+		if (!res.ok) {
+			const text = await res.text();
+			return { error: `elevenlabs: ${res.status} ${text}`, code: res.status };
+		}
+		const data = await res.json();
+		// signed_url is a wss:// URL scoped to one conversation. Returned directly
+		// to the mobile client — never leaks the ElevenLabs API key.
+		return {
+			data: {
+				signedUrl: data.signed_url,
+				agentId,
+				apiKeyTier: keyData.tier,
+				// Used by the client to tag the conversation so the webhook can
+				// credit usage back to the right keyData on callback.
+				conversationTag: `key:${keyData.key}:ts:${Date.now()}`,
+			},
+			code: 200,
+		};
+	} catch (err) {
+		return { error: `voice_session_failed: ${err.message}`, code: 500 };
+	}
+}
+
+/**
+ * ElevenLabs post-call webhook.
+ *
+ * Triggered by ElevenLabs when a conversation ends. Body shape (subset):
+ *   {
+ *     type: 'conversation.finished',
+ *     conversation_id: '...',
+ *     agent_id: '...',
+ *     metadata: { conversation_initiation_client_data: { dynamic_variables: { conversationTag: 'key:etrn_...:ts:...' } } },
+ *     analytics: { call_duration_secs: 123 }
+ *   }
+ *
+ * We read the conversationTag to find the API key, compute voice cost, and
+ * debit the usage counter — partner markup applied automatically.
+ */
+async function handleElevenLabsWebhook(request, env) {
+	// Signature verification (ElevenLabs signs webhooks with HMAC-SHA256)
+	if (env.ELEVENLABS_WEBHOOK_SECRET) {
+		const sig = request.headers.get('elevenlabs-signature') || '';
+		const raw = await request.clone().text();
+		const valid = await verifyElevenLabsSignature(raw, sig, env.ELEVENLABS_WEBHOOK_SECRET);
+		if (!valid) return { error: 'invalid_signature', code: 401 };
+	}
+
+	let body;
+	try {
+		body = await request.json();
+	} catch {
+		return { error: 'invalid_json', code: 400 };
+	}
+
+	const eventType = body.type || body.event_type;
+	if (eventType !== 'conversation.finished' && eventType !== 'post_call_transcription') {
+		return { data: { ok: true, ignored: eventType }, code: 200 };
+	}
+
+	// Extract the tag we stamped on session-start.
+	// Non-anchored so LaMarnie can wrap our tag as "ml:SID.key:X:ts:Y" and we
+	// still find our billing key.
+	const tag =
+		body?.metadata?.conversation_initiation_client_data?.dynamic_variables?.conversationTag ||
+		body?.conversation_initiation_client_data?.dynamic_variables?.conversationTag ||
+		'';
+	const keyMatch = tag.match(/key:([^:]+):/);
+	const apiKey = keyMatch ? keyMatch[1] : null;
+
+	const durationSecs =
+		body?.analytics?.call_duration_secs ||
+		body?.analysis?.call_duration_secs ||
+		body?.duration_secs ||
+		0;
+
+	if (!apiKey || durationSecs <= 0) {
+		return {
+			data: { ok: true, metered: false, reason: 'missing_key_or_duration' },
+			code: 200,
+		};
+	}
+
+	const keyRaw = await env.API_KEYS.get(apiKey);
+	if (!keyRaw) return { data: { ok: true, metered: false, reason: 'key_not_found' }, code: 200 };
+	const keyData = JSON.parse(keyRaw);
+
+	const credits = getVoiceCost('elevenlabs-conv', durationSecs, keyData.tier);
+	await trackUsage(env, apiKey, credits, 'elevenlabs-conv', false);
+
+	return {
+		data: {
+			ok: true,
+			metered: true,
+			credits,
+			durationSecs,
+			tier: keyData.tier,
+			conversationId: body.conversation_id,
+		},
+		code: 200,
+	};
+}
+
+async function verifyElevenLabsSignature(rawBody, signature, secret) {
+	try {
+		const enc = new TextEncoder();
+		const key = await crypto.subtle.importKey(
+			'raw',
+			enc.encode(secret),
+			{ name: 'HMAC', hash: 'SHA-256' },
+			false,
+			['sign']
+		);
+		const sigBuf = await crypto.subtle.sign('HMAC', key, enc.encode(rawBody));
+		const expected = Array.from(new Uint8Array(sigBuf))
+			.map((b) => b.toString(16).padStart(2, '0'))
+			.join('');
+		return expected === signature || signature.includes(expected);
+	} catch {
+		return false;
+	}
+}
+
 // ── Main handler ────────────────────────────────────────────────
 export default {
 	async scheduled(event, env, ctx) {
@@ -1185,6 +1374,7 @@ export default {
 				description: m.description, credits_per_gen: m.credits_per_gen,
 				featured: m.featured || false,
 				supports_editing: m.supports_editing || false,
+				...(m.max_reference_images != null ? { max_reference_images: m.max_reference_images } : {}),
 			}));
 			return json({ models, credit_value: CREDIT_VALUE }, 200, cors);
 		}
@@ -1196,6 +1386,7 @@ export default {
 					id, type: m.type, name: m.name, provider: m.provider,
 					description: m.description, credits_per_gen: m.credits_per_gen,
 					supports_editing: m.supports_editing || false,
+					...(m.max_reference_images != null ? { max_reference_images: m.max_reference_images } : {}),
 				}));
 			return json({ models, credit_value: CREDIT_VALUE }, 200, cors);
 		}
@@ -1271,6 +1462,14 @@ export default {
 		// ── Stripe webhook ───────────────────────────────────────────
 		if (url.pathname === '/webhooks/stripe' && request.method === 'POST') {
 			const result = await handleStripeWebhook(request, env);
+			return json(result.data || { error: result.error }, result.code, cors);
+		}
+
+		// ── ElevenLabs conversation.finished webhook ────────────────
+		// Post-call meter: reads conversationTag to route usage back to the
+		// right API key, applies partner markup via getVoiceCost.
+		if (url.pathname === '/webhooks/elevenlabs/conversation' && request.method === 'POST') {
+			const result = await handleElevenLabsWebhook(request, env);
 			return json(result.data || { error: result.error }, result.code, cors);
 		}
 
@@ -1612,6 +1811,14 @@ export default {
 			try { body = await request.json(); }
 			catch { return json({ error: 'Invalid JSON body' }, 400, headers); }
 			const result = await handleGenerate(body, env, keyData);
+			return json(result.data || { error: result.error, usage: result.usage }, result.code, headers);
+		}
+
+		// POST /v1/voice/session — issue short-lived ElevenLabs signed URL
+		if (url.pathname === '/v1/voice/session' && request.method === 'POST') {
+			let body = {};
+			try { body = await request.json(); } catch {}
+			const result = await handleVoiceSession(body, env, keyData);
 			return json(result.data || { error: result.error, usage: result.usage }, result.code, headers);
 		}
 
