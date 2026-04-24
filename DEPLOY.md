@@ -36,6 +36,7 @@ wrangler secret put KIE_API_KEY             # Your Kie.ai API key
 wrangler secret put STRIPE_SECRET_KEY       # sk_live_... from Stripe
 wrangler secret put STRIPE_WEBHOOK_SECRET   # whsec_... (created in step 5)
 wrangler secret put JWT_SECRET              # Any random string (64+ chars)
+wrangler secret put ANTHROPIC_API_KEY       # Anthropic API key (for Ad Commander copy generation)
 ```
 
 ## 4. Deploy
