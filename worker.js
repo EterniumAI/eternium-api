@@ -43,6 +43,7 @@ import { handleCreditBalance, handleCreditDeduct, handleCreditAdd, handleCreditH
 import {
 	queueWelcomeSequence, processEmailQueue,
 } from './lib/email.js';
+import { handleAdCommanderDraft } from './lib/ad-commander-copy.js';
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
@@ -1903,6 +1904,16 @@ export default {
 		// POST /v1/affiliate/generate -- create affiliate link
 		if (url.pathname === '/v1/affiliate/generate' && request.method === 'POST') {
 			const result = await handleAffiliateGenerate(env, keyData);
+			return json(result.data || { error: result.error }, result.code, headers);
+		}
+
+		// ── Ad Commander routes ───────────────────────────────────────
+		// POST /v1/ad-commander/creatives/draft -- generate ad copy variants
+		if (url.pathname === '/v1/ad-commander/creatives/draft' && request.method === 'POST') {
+			let body;
+			try { body = await request.json(); }
+			catch { return json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, 400, headers); }
+			const result = await handleAdCommanderDraft(body, env, keyData);
 			return json(result.data || { error: result.error }, result.code, headers);
 		}
 
