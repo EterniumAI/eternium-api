@@ -43,11 +43,13 @@ import { handleCreditBalance, handleCreditDeduct, handleCreditAdd, handleCreditH
 import {
 	queueWelcomeSequence, processEmailQueue,
 } from './lib/email.js';
+import { runInternalChatCompletion } from './lib/internal-llm.js';
 import { handleAdCommanderDraft } from './lib/ad-commander-copy.js';
 import {
 	handleCreateCreative, handleAutofillCopy, handlePatchCreative,
 	handleReviewCreative, handlePublishCreative, handleGetActionLog,
 	handleGetMetrics, handleListCreatives,
+	handleSwapPublish, handleSwapStatus,
 } from './lib/ad-commander.js';
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
@@ -604,35 +606,31 @@ async function handleChatCompletions(request, env, keyData) {
 		body.stream_options = { include_usage: true };
 	}
 
-	// Forward to OpenAI (with OpenRouter fallback on 5xx)
-	let upstreamRes;
-	try {
-		upstreamRes = await fetch(`${OPENAI_BASE}/chat/completions`, {
-			method: 'POST',
-			headers: {
-				'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
-				'Content-Type': 'application/json',
-			},
-			body: JSON.stringify(body),
-		});
-	} catch (e) {
-		// Network error -- try OpenRouter
-		upstreamRes = null;
-	}
-
-	// Fallback to OpenRouter on server error, quota exhaustion, or network failure
-	if (!upstreamRes || upstreamRes.status >= 500 || upstreamRes.status === 429) {
-		const fallback = await openrouterFallback('/chat/completions', body, env);
-		if (fallback) upstreamRes = fallback;
-	}
-
-	if (!upstreamRes || !upstreamRes.ok) {
-		const errBody = upstreamRes ? await upstreamRes.text() : '{"error":"All providers unavailable"}';
-		const errStatus = upstreamRes ? upstreamRes.status : 503;
-		return { response: new Response(errBody, { status: errStatus, headers: { 'Content-Type': 'application/json' } }) };
-	}
-
+	// Streaming: use direct fetch + openrouterFallback (pass-through)
 	if (isStreaming) {
+		let upstreamRes;
+		try {
+			upstreamRes = await fetch(`${OPENAI_BASE}/chat/completions`, {
+				method: 'POST',
+				headers: {
+					'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify(body),
+			});
+		} catch (e) {
+			upstreamRes = null;
+		}
+		if (!upstreamRes || upstreamRes.status >= 500 || upstreamRes.status === 429) {
+			const fallback = await openrouterFallback('/chat/completions', body, env);
+			if (fallback) upstreamRes = fallback;
+		}
+		if (!upstreamRes || !upstreamRes.ok) {
+			const errBody = upstreamRes ? await upstreamRes.text() : '{"error":"All providers unavailable"}';
+			const errStatus = upstreamRes ? upstreamRes.status : 503;
+			return { response: new Response(errBody, { status: errStatus, headers: { 'Content-Type': 'application/json' } }) };
+		}
+
 		// Stream through, track usage from the final chunk
 		const { readable, writable } = new TransformStream();
 		const writer = writable.getWriter();
@@ -681,14 +679,18 @@ async function handleChatCompletions(request, env, keyData) {
 		};
 	}
 
-	// Non-streaming: parse response, track usage, return verbatim
-	const data = await upstreamRes.json();
-	if (data.usage) {
-		const credits = getChatCost(model, data.usage.prompt_tokens || 0, data.usage.completion_tokens || 0, keyData.tier);
+	// Non-streaming: delegate to shared internal helper
+	const result = await runInternalChatCompletion(env, body);
+	if (!result.ok) {
+		return { response: new Response(JSON.stringify({ error: result.error }), { status: result.code, headers: { 'Content-Type': 'application/json' } }) };
+	}
+
+	if (result.data.usage) {
+		const credits = getChatCost(model, result.data.usage.prompt_tokens || 0, result.data.usage.completion_tokens || 0, keyData.tier);
 		await trackUsage(env, keyData.key, credits, model, false);
 	}
 
-	return { response: new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }) };
+	return { response: new Response(JSON.stringify(result.data), { status: 200, headers: { 'Content-Type': 'application/json' } }) };
 }
 
 async function handleEmbeddings(request, env, keyData) {
@@ -1975,6 +1977,23 @@ export default {
 		const actionLogMatch = url.pathname.match(/^\/v1\/ad-commander\/action-logs\/([^/]+)$/);
 		if (actionLogMatch && request.method === 'GET') {
 			const result = await handleGetActionLog(actionLogMatch[1], env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// POST /v1/ad-commander/projects/:pid/ad-accounts/:aid/creatives/:cid/swap-publish
+		const swapPublishMatch = url.pathname.match(/^\/v1\/ad-commander\/projects\/([^/]+)\/ad-accounts\/([^/]+)\/creatives\/([^/]+)\/swap-publish$/);
+		if (swapPublishMatch && request.method === 'POST') {
+			let body;
+			try { body = await request.json(); }
+			catch { return json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, 400, headers); }
+			const result = await handleSwapPublish(swapPublishMatch[1], swapPublishMatch[2], swapPublishMatch[3], body, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// GET /v1/ad-commander/projects/:pid/ad-accounts/:aid/swap-status/:queue_id
+		const swapStatusMatch = url.pathname.match(/^\/v1\/ad-commander\/projects\/([^/]+)\/ad-accounts\/([^/]+)\/swap-status\/([^/]+)$/);
+		if (swapStatusMatch && request.method === 'GET') {
+			const result = await handleSwapStatus(swapStatusMatch[1], swapStatusMatch[2], swapStatusMatch[3], env, keyData);
 			return json(result.data, result.code, headers);
 		}
 
