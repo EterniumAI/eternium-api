@@ -278,6 +278,87 @@ async function gptImage2Tests() {
 
 // ── Runner ─────────────────────────────────────────────────────
 
+// ── runInternalChatCompletion unit tests (stub fetch) ──���───────
+
+async function internalLlmTests() {
+    console.log(`\n${BOLD}[Internal LLM Helper]${RESET}`);
+
+    const originalFetch = globalThis.fetch;
+
+    await runTest('runInternalChatCompletion: happy-path OpenAI returns ok', async () => {
+        const mockResponse = {
+            choices: [{ message: { content: 'Hello world' } }],
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
+        };
+
+        globalThis.fetch = async (url) => {
+            assert(url.includes('api.openai.com'), `Expected OpenAI URL, got ${url}`);
+            return {
+                ok: true,
+                status: 200,
+                json: async () => mockResponse,
+                text: async () => JSON.stringify(mockResponse),
+            };
+        };
+
+        const { runInternalChatCompletion } = await import('../lib/internal-llm.js');
+        const env = { OPENAI_API_KEY: 'sk-test-key', OPENROUTER_API_KEY: 'or-test-key' };
+        const body = { model: 'gpt-5.4', messages: [{ role: 'user', content: 'hi' }] };
+
+        const result = await runInternalChatCompletion(env, body);
+        assert(result.ok === true, `Expected ok=true, got ${result.ok}`);
+        assert(result.provider === 'openai', `Expected provider=openai, got ${result.provider}`);
+        assert(result.data.choices[0].message.content === 'Hello world', 'Expected Hello world content');
+        assert(result.tokenUsage.input === 10, `Expected input=10, got ${result.tokenUsage.input}`);
+        assert(result.tokenUsage.output === 5, `Expected output=5, got ${result.tokenUsage.output}`);
+
+        globalThis.fetch = originalFetch;
+    });
+
+    await runTest('runInternalChatCompletion: OpenAI 500 falls back to OpenRouter', async () => {
+        const orResponse = {
+            choices: [{ message: { content: 'Fallback response' } }],
+            usage: { prompt_tokens: 8, completion_tokens: 3 },
+        };
+
+        let callCount = 0;
+        globalThis.fetch = async (url, opts) => {
+            callCount++;
+            if (url.includes('api.openai.com')) {
+                return {
+                    ok: false,
+                    status: 500,
+                    json: async () => ({ error: { message: 'Internal server error' } }),
+                    text: async () => '{"error":{"message":"Internal server error"}}',
+                };
+            }
+            if (url.includes('openrouter.ai')) {
+                const parsedBody = JSON.parse(opts.body);
+                assert(parsedBody.model === 'openai/gpt-5.4', `Expected remapped model, got ${parsedBody.model}`);
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => orResponse,
+                    text: async () => JSON.stringify(orResponse),
+                };
+            }
+            throw new Error(`Unexpected fetch URL: ${url}`);
+        };
+
+        const { runInternalChatCompletion } = await import('../lib/internal-llm.js');
+        const env = { OPENAI_API_KEY: 'sk-test-key', OPENROUTER_API_KEY: 'or-test-key' };
+        const body = { model: 'gpt-5.4', messages: [{ role: 'user', content: 'hi' }] };
+
+        const result = await runInternalChatCompletion(env, body);
+        assert(result.ok === true, `Expected ok=true, got ${JSON.stringify(result)}`);
+        assert(result.provider === 'openrouter', `Expected provider=openrouter, got ${result.provider}`);
+        assert(result.data.choices[0].message.content === 'Fallback response', 'Expected fallback content');
+        assert(callCount === 2, `Expected 2 fetch calls (OpenAI + OpenRouter), got ${callCount}`);
+
+        globalThis.fetch = originalFetch;
+    });
+}
+
 async function main() {
     console.log(`\n${'='.repeat(50)}`);
     console.log(`${BOLD}  Eternium API Test Suite${RESET}`);
@@ -285,6 +366,7 @@ async function main() {
     console.log(`  Key:    ${TEST_KEY ? TEST_KEY.slice(0, 8) + '...' + TEST_KEY.slice(-4) : '(not set)'}`);
     console.log(`${'='.repeat(50)}`);
 
+    await internalLlmTests();
     await publicEndpoints();
     await authValidation();
     await errorHandling();
