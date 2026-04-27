@@ -51,6 +51,9 @@ import {
 	handleGetMetrics, handleListCreatives,
 	handleSwapPublish, handleSwapStatus,
 } from './lib/ad-commander.js';
+import {
+	handleRetireCreative, handleHoldCreative, handlePromoteCreative,
+} from './lib/ad-commander-lifecycle.js';
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
@@ -1960,6 +1963,36 @@ export default {
 			try { body = await request.json(); }
 			catch { return json({ error: 'Invalid JSON body', code: 'INVALID_JSON' }, 400, headers); }
 			const result = await handlePublishCreative(publishMatch[1], body, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// POST /v1/ad-commander/creatives/:id/retire
+		const retireMatch = url.pathname.match(/^\/v1\/ad-commander\/creatives\/([^/]+)\/retire$/);
+		if (retireMatch && request.method === 'POST') {
+			let body;
+			try { body = await request.json(); }
+			catch { body = {}; }
+			const result = await handleRetireCreative(retireMatch[1], body, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// POST /v1/ad-commander/creatives/:id/hold
+		const holdMatch = url.pathname.match(/^\/v1\/ad-commander\/creatives\/([^/]+)\/hold$/);
+		if (holdMatch && request.method === 'POST') {
+			let body;
+			try { body = await request.json(); }
+			catch { body = {}; }
+			const result = await handleHoldCreative(holdMatch[1], body, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// POST /v1/ad-commander/creatives/:id/promote
+		const promoteMatch = url.pathname.match(/^\/v1\/ad-commander\/creatives\/([^/]+)\/promote$/);
+		if (promoteMatch && request.method === 'POST') {
+			let body;
+			try { body = await request.json(); }
+			catch { body = {}; }
+			const result = await handlePromoteCreative(promoteMatch[1], body, env, keyData);
 			return json(result.data, result.code, headers);
 		}
 
