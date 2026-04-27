@@ -48,7 +48,7 @@ import { handleAdCommanderDraft } from './lib/ad-commander-copy.js';
 import {
 	handleCreateCreative, handleAutofillCopy, handlePatchCreative,
 	handleReviewCreative, handlePublishCreative, handleGetActionLog,
-	handleGetMetrics, handleListCreatives,
+	handleGetMetrics, handleListCreatives, handleListAdSets,
 	handleSwapPublish, handleSwapStatus,
 } from './lib/ad-commander.js';
 import {
@@ -2034,6 +2034,13 @@ export default {
 		const metricsMatch = url.pathname.match(/^\/v1\/ad-commander\/projects\/([^/]+)\/ad-accounts\/([^/]+)\/metrics$/);
 		if (metricsMatch && request.method === 'GET') {
 			const result = await handleGetMetrics(metricsMatch[1], metricsMatch[2], url.searchParams, env, keyData);
+			return json(result.data, result.code, headers);
+		}
+
+		// GET /v1/ad-commander/projects/:project_id/ad-accounts/:ads_account_id/ad-sets
+		const adSetsMatch = url.pathname.match(/^\/v1\/ad-commander\/projects\/([^/]+)\/ad-accounts\/([^/]+)\/ad-sets$/);
+		if (adSetsMatch && request.method === 'GET') {
+			const result = await handleListAdSets(adSetsMatch[1], adSetsMatch[2], env, keyData);
 			return json(result.data, result.code, headers);
 		}
 
