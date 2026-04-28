@@ -244,7 +244,7 @@ async function gptImage2Tests() {
         assert(model, 'Expected gpt-image-2 in models list');
         assert(model.type === 'image', `Expected type "image", got "${model.type}"`);
         assert(model.provider === 'OpenAI', `Expected provider "OpenAI", got "${model.provider}"`);
-        assert(model.supports_editing === true, `Expected supports_editing true, got ${model.supports_editing}`);
+        assert(model.upstream === 'openai', `Expected upstream "openai", got "${model.upstream}"`);
     });
 
     if (!TEST_KEY) {
@@ -273,6 +273,66 @@ async function gptImage2Tests() {
         assert(status === 400, `Expected 400, got ${status}`);
         assert(body.error && body.error.includes('image_urls_too_many'),
             `Expected image_urls_too_many error, got "${body.error}"`);
+    });
+}
+
+async function openaiImageRoutingTests() {
+    console.log(`\n${BOLD}[OpenAI Image Routing]${RESET}`);
+
+    await runTest('GET /v1/models includes gpt-image-1 with upstream openai', async () => {
+        const { status, body } = await fetchApi('/v1/models');
+        assert(status === 200, `Expected 200, got ${status}`);
+        const model = body.models.find(m => m.id === 'gpt-image-1');
+        assert(model, 'Expected gpt-image-1 in models list');
+        assert(model.type === 'image', `Expected type "image", got "${model.type}"`);
+        assert(model.provider === 'OpenAI', `Expected provider "OpenAI", got "${model.provider}"`);
+        assert(model.upstream === 'openai', `Expected upstream "openai", got "${model.upstream}"`);
+    });
+
+    await runTest('GET /v1/models shows upstream field for all models', async () => {
+        const { status, body } = await fetchApi('/v1/models');
+        assert(status === 200, `Expected 200, got ${status}`);
+        for (const m of body.models) {
+            if (m.type === 'image' || m.type === 'video') {
+                assert(m.upstream === 'kie' || m.upstream === 'openai',
+                    `Model ${m.id} has unexpected upstream "${m.upstream}"`);
+            }
+        }
+    });
+
+    await runTest('Kie-routed model nano-banana-2 has upstream kie', async () => {
+        const { status, body } = await fetchApi('/v1/models');
+        assert(status === 200, `Expected 200, got ${status}`);
+        const model = body.models.find(m => m.id === 'nano-banana-2');
+        assert(model, 'Expected nano-banana-2 in models list');
+        assert(model.upstream === 'kie', `Expected upstream "kie", got "${model.upstream}"`);
+    });
+
+    if (!TEST_KEY) {
+        console.log(`  ${YELLOW}WARNING${RESET} ETERNIUM_TEST_KEY not set -- skipping OpenAI image auth tests`);
+        for (let i = 0; i < 2; i++) skipTest('(requires ETERNIUM_TEST_KEY)');
+        return;
+    }
+
+    const authHeaders = { 'X-API-Key': TEST_KEY, 'Content-Type': 'application/json' };
+
+    await runTest('POST /v1/generate with gpt-image-1 returns 200 + taskId', async () => {
+        const { status, body } = await fetchApi('/v1/generate', {
+            method: 'POST', headers: authHeaders,
+            body: JSON.stringify({ model: 'gpt-image-1', prompt: 'a small red square on white background', aspect_ratio: '1:1' }),
+        });
+        assert(status === 200, `Expected 200, got ${status}. Body: ${JSON.stringify(body)}`);
+        assert(body.data && body.data.taskId, `Expected data.taskId, got ${JSON.stringify(body)}`);
+        assert(body.data._credits > 0, `Expected _credits > 0, got ${body.data._credits}`);
+    });
+
+    await runTest('POST /v1/generate rejects nonexistent model with 400', async () => {
+        const { status, body } = await fetchApi('/v1/generate', {
+            method: 'POST', headers: authHeaders,
+            body: JSON.stringify({ model: 'openai-fake-model-xyz', prompt: 'test' }),
+        });
+        assert(status === 400, `Expected 400, got ${status}`);
+        assert(body.error, 'Expected error response');
     });
 }
 
@@ -372,6 +432,7 @@ async function main() {
     await errorHandling();
     await securityTests();
     await gptImage2Tests();
+    await openaiImageRoutingTests();
 
     console.log(`\n${'='.repeat(50)}`);
     const total = passed + failed;
