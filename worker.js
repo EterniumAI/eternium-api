@@ -77,11 +77,9 @@ const TENANT_DOMAIN_SUFFIX = '.app.eternium.ai';
 // Image models: flat per-image cost
 // Video models: nested by mode/resolution → duration
 const KIE_COSTS = {
-	// ── Image ──
+	// ── Image (Kie-routed only) ──
 	'nano-banana-2':    0.045,
 	'nano-banana-pro':  0.03,
-	'gpt-5.4-image':    0.05,
-	'gpt-image-2':      0.05,
 	'flux-kontext':     0.04,
 	'seedream-5':       0.03,
 	'qwen-image-2':     0.03,
@@ -95,6 +93,17 @@ const KIE_COSTS = {
 	'wan-2.6':      { '720p': { 5: 0.30, 10: 0.60 }, '1080p': { 5: 0.50, 10: 1.00 } },
 	'hailuo-2.3':   { std: { 5: 0.28, 10: 0.55 }, pro: { 5: 0.49, 10: 0.95 } },
 	'seedance-2':   { std: { 5: 0.35, 10: 0.70 }, pro: { 5: 0.55, 10: 1.10 } },
+};
+
+// ── OpenAI image generation base costs (USD per image) ─────────
+// gpt-image-1 pricing (from OpenAI): low $0.011, medium $0.042, high $0.167 (1024x1024)
+// We use "high" quality by default. Sizes affect price; we normalize to a single per-gen cost.
+// Aspect ratio size mapping: 1024x1024 (square), 1024x1536 (portrait), 1536x1024 (landscape)
+// High quality costs: 1024x1024=$0.167, 1024x1536=$0.214, 1536x1024=$0.214
+const OPENAI_IMAGE_COSTS = {
+	'gpt-image-1':   0.167, // high quality 1024x1024 baseline
+	'gpt-5.4-image': 0.167, // alias for gpt-image-1
+	'gpt-image-2':   0.167, // alias for gpt-image-1 (OpenAI has not shipped gpt-image-2 yet)
 };
 
 // ── OpenAI base costs (USD per 1M tokens) ──────────────────────
@@ -119,6 +128,14 @@ const PARTNER_MARKUP = 1.18; // flat 18% across all types for partner-tier clien
 
 // ── Cost → credits (returns integer) ────────────────────────────
 function getGenerationCost(model, params = {}, keyTier = null) {
+	// Check OpenAI image costs first, then Kie
+	const openaiBase = OPENAI_IMAGE_COSTS[model];
+	if (openaiBase) {
+		const mul = keyTier === 'internal' ? 1 : keyTier === 'partner' ? PARTNER_MARKUP : null;
+		const usd = openaiBase * (mul ?? MARKUP.image);
+		return Math.ceil(usd / CREDIT_VALUE);
+	}
+
 	const base = KIE_COSTS[model];
 	if (!base) return 0;
 	const mul = keyTier === 'internal' ? 1 : keyTier === 'partner' ? PARTNER_MARKUP : null;
@@ -186,58 +203,65 @@ const TIERS = {
 const MODELS = {
 	// ── Image ── Featured first ──
 	'nano-banana-2': {
-		type: 'image', name: 'Nano Banana 2', provider: 'Google',
+		type: 'image', name: 'Nano Banana 2', provider: 'Google', upstream: 'kie',
 		description: 'Latest Gemini image model with sharper 2K output, improved text rendering, and character consistency',
 		defaults: { aspect_ratio: '1:1', resolution: '2K', output_format: 'png' },
 		credits_per_gen: 12, featured: true,
 		max_reference_images: 3,
 	},
-	'gpt-5.4-image': {
-		type: 'image', name: 'GPT-5.4 Image', provider: 'OpenAI',
-		description: 'OpenAI flagship image generation with exceptional prompt understanding',
+	'gpt-image-1': {
+		type: 'image', name: 'GPT Image 1', provider: 'OpenAI', upstream: 'openai',
+		description: 'OpenAI image generation with high-fidelity output, text rendering, and prompt adherence',
 		defaults: { aspect_ratio: '1:1' },
-		credits_per_gen: 14, featured: true,
-		max_reference_images: 8,
+		credits_per_gen: 46, featured: true,
+		max_reference_images: 0,
+	},
+	'gpt-5.4-image': {
+		type: 'image', name: 'GPT-5.4 Image', provider: 'OpenAI', upstream: 'openai',
+		description: 'OpenAI flagship image generation with exceptional prompt understanding (routes to gpt-image-1)',
+		defaults: { aspect_ratio: '1:1' },
+		credits_per_gen: 46, featured: true,
+		max_reference_images: 0,
 	},
 	'gpt-image-2': {
-		type: 'image', name: 'GPT Image 2', provider: 'OpenAI',
-		description: 'OpenAI flagship image model with near-perfect text rendering, multilingual generation, and pixel-level editing for inpaint and reference workflows',
+		type: 'image', name: 'GPT Image 2', provider: 'OpenAI', upstream: 'openai',
+		description: 'OpenAI image model (routes to gpt-image-1 until OpenAI ships gpt-image-2)',
 		defaults: { aspect_ratio: 'auto' },
-		credits_per_gen: 14, featured: true,
-		supports_editing: true,
-		max_reference_images: 16,
+		credits_per_gen: 46, featured: true,
+		supports_editing: false,
+		max_reference_images: 0,
 	},
 	'seedream-5': {
-		type: 'image', name: 'Seedream 5.0 Lite', provider: 'ByteDance',
+		type: 'image', name: 'Seedream 5.0 Lite', provider: 'ByteDance', upstream: 'kie',
 		description: 'ByteDance image model with up to 4K output and fast generation',
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 8, featured: true,
 		max_reference_images: 4,
 	},
 	'nano-banana-pro': {
-		type: 'image', name: 'Nano Banana Pro', provider: 'Google',
+		type: 'image', name: 'Nano Banana Pro', provider: 'Google', upstream: 'kie',
 		description: 'Fast, precise AI image generation with native 4K output',
 		defaults: { aspect_ratio: '1:1', resolution: '1K', output_format: 'png' },
 		credits_per_gen: 8,
 		max_reference_images: 3,
 	},
 	'flux-kontext': {
-		type: 'image', name: 'Flux Kontext', provider: 'Black Forest Labs',
+		type: 'image', name: 'Flux Kontext', provider: 'Black Forest Labs', upstream: 'kie',
 		description: 'Advanced image generation and editing with reference images',
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 11,
 		max_reference_images: 4,
 	},
 	'qwen-image-2': {
-		type: 'image', name: 'Qwen Image 2.0', provider: 'Qwen',
+		type: 'image', name: 'Qwen Image 2.0', provider: 'Qwen', upstream: 'kie',
 		description: 'Qwen image generation with strong text rendering',
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 8,
 		max_reference_images: 4,
 	},
 	'midjourney': {
-		type: 'image', name: 'Midjourney', provider: 'Midjourney',
-		description: 'Midjourney v6 via API — 4 variants per generation',
+		type: 'image', name: 'Midjourney', provider: 'Midjourney', upstream: 'kie',
+		description: 'Midjourney v6 via API -- 4 variants per generation',
 		defaults: { aspect_ratio: '1:1' },
 		credits_per_gen: 11,
 		max_reference_images: 2,
@@ -245,49 +269,49 @@ const MODELS = {
 
 	// ── Video ── Featured first ──
 	'kling-3.0-mc': {
-		type: 'video', name: 'Kling 3.0 Motion Control', provider: 'Kling',
+		type: 'video', name: 'Kling 3.0 Motion Control', provider: 'Kling', upstream: 'kie',
 		description: 'Advanced video with camera path control, element references, and multi-shot',
 		defaults: { duration: 5, aspect_ratio: '16:9', mode: 'std', sound: false },
 		credits_per_gen: '91-364', featured: true,
 	},
 	'veo-3': {
-		type: 'video', name: 'Veo 3', provider: 'Google',
-		description: 'Google Veo 3 — high-quality video generation with native audio',
+		type: 'video', name: 'Veo 3', provider: 'Google', upstream: 'kie',
+		description: 'Google Veo 3 -- high-quality video generation with native audio',
 		defaults: { duration: 5, mode: 'fast', sound: true },
 		credits_per_gen: '104-520', featured: true,
 	},
 	'sora-2': {
-		type: 'video', name: 'Sora 2', provider: 'OpenAI',
-		description: 'OpenAI Sora 2 — text and image to video with cinematic quality',
+		type: 'video', name: 'Sora 2', provider: 'OpenAI', upstream: 'kie',
+		description: 'OpenAI Sora 2 -- text and image to video with cinematic quality',
 		defaults: { duration: 5, aspect_ratio: '16:9', mode: 'std' },
 		credits_per_gen: '130-520', featured: true,
 	},
 	'seedance-2': {
-		type: 'video', name: 'Seedance 2.0', provider: 'ByteDance',
+		type: 'video', name: 'Seedance 2.0', provider: 'ByteDance', upstream: 'kie',
 		description: 'ByteDance video generation with dance and motion specialization',
 		defaults: { duration: 5, aspect_ratio: '16:9', mode: 'std' },
 		credits_per_gen: '91-286', featured: true,
 	},
 	'kling-3.0': {
-		type: 'video', name: 'Kling 3.0', provider: 'Kling',
+		type: 'video', name: 'Kling 3.0', provider: 'Kling', upstream: 'kie',
 		description: 'Advanced video generation with multi-shot and element references',
 		defaults: { duration: 5, aspect_ratio: '16:9', mode: 'std', sound: false },
 		credits_per_gen: '91-286',
 	},
 	'hailuo-2.3': {
-		type: 'video', name: 'Hailuo 2.3', provider: 'MiniMax',
+		type: 'video', name: 'Hailuo 2.3', provider: 'MiniMax', upstream: 'kie',
 		description: 'MiniMax video generation with standard and pro quality modes',
 		defaults: { duration: 5, aspect_ratio: '16:9', mode: 'std' },
 		credits_per_gen: '73-247',
 	},
 	'wan-2.6': {
-		type: 'video', name: 'Wan 2.6', provider: 'Alibaba',
+		type: 'video', name: 'Wan 2.6', provider: 'Alibaba', upstream: 'kie',
 		description: 'Multi-shot HD video with native audio support',
 		defaults: { duration: 5, resolution: '720p' },
 		credits_per_gen: '78-260',
 	},
 	'kling-2.6': {
-		type: 'video', name: 'Kling 2.6', provider: 'Kling',
+		type: 'video', name: 'Kling 2.6', provider: 'Kling', upstream: 'kie',
 		description: 'High-quality video generation with audio support',
 		defaults: { duration: 5, aspect_ratio: '16:9', mode: 'std', sound: false },
 		credits_per_gen: '73-234',
@@ -787,8 +811,6 @@ function buildKieBody(model, prompt, params) {
 	const KIE_SLUGS = {
 		'nano-banana-2':   'nano-banana-2',
 		'nano-banana-pro': 'nano-banana-pro',
-		'gpt-5.4-image':   'gpt-5.4/generate',
-		'gpt-image-2':     'gpt-image-2/generate',
 		'flux-kontext':    'flux-kontext/generate',
 		'seedream-5':      'seedream-5.0-lite/generate',
 		'qwen-image-2':    'qwen-image-2.0/generate',
@@ -849,6 +871,110 @@ function buildKieBody(model, prompt, params) {
 	}
 }
 
+// ── OpenAI Image Generation (direct routing) ───────────────────
+// Aspect ratio to OpenAI size mapping. OpenAI accepts specific pixel sizes.
+const ASPECT_TO_OPENAI_SIZE = {
+	'1:1':   '1024x1024',
+	'4:5':   '1024x1536',  // closest portrait
+	'9:16':  '1024x1536',  // vertical/stories
+	'3:4':   '1024x1536',
+	'16:9':  '1536x1024',  // landscape
+	'5:4':   '1536x1024',
+	'4:3':   '1536x1024',
+	'auto':  'auto',
+};
+
+// Maps our model IDs to real OpenAI model IDs
+const OPENAI_IMAGE_MODEL_MAP = {
+	'gpt-image-1':   'gpt-image-1',
+	'gpt-5.4-image': 'gpt-image-1',
+	'gpt-image-2':   'gpt-image-1', // mapped until OpenAI ships gpt-image-2
+};
+
+async function handleOpenAIImageGenerate(env, body, keyData) {
+	const { model, prompt, aspect_ratio, quality, ...rest } = body;
+
+	const openaiModel = OPENAI_IMAGE_MODEL_MAP[model];
+	if (!openaiModel) {
+		return { error: `Unsupported OpenAI image model: ${model}`, code: 422 };
+	}
+
+	if (!env.OPENAI_API_KEY) {
+		return { error: 'OpenAI API key not configured', code: 500 };
+	}
+
+	const size = ASPECT_TO_OPENAI_SIZE[aspect_ratio || '1:1'] || '1024x1024';
+
+	const openaiBody = {
+		model: openaiModel,
+		prompt,
+		n: 1,
+		size,
+		quality: quality || 'high',
+	};
+
+	let openaiRes;
+	try {
+		openaiRes = await fetch('https://api.openai.com/v1/images/generations', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+			},
+			body: JSON.stringify(openaiBody),
+		});
+	} catch (e) {
+		return { error: `OpenAI request failed: ${e.message}`, code: 502 };
+	}
+
+	if (!openaiRes.ok) {
+		let errMsg = `OpenAI returned ${openaiRes.status}`;
+		try {
+			const errBody = await openaiRes.json();
+			errMsg = errBody.error?.message || errMsg;
+		} catch { /* use default */ }
+		return { error: errMsg, code: openaiRes.status >= 400 && openaiRes.status < 500 ? openaiRes.status : 502 };
+	}
+
+	const openaiData = await openaiRes.json();
+	const imageUrl = openaiData.data?.[0]?.url || openaiData.data?.[0]?.b64_json || null;
+
+	if (!imageUrl) {
+		return { error: 'OpenAI returned no image data', code: 502 };
+	}
+
+	// Generate a synthetic taskId so clients can poll /v1/tasks/:id
+	const taskId = crypto.randomUUID();
+
+	// Write result to KV CACHE so /v1/tasks/:id can find it
+	if (env.CACHE) {
+		const taskRecord = {
+			code: 200,
+			msg: 'success',
+			data: {
+				state: 'success',
+				taskId,
+				resultUrl: imageUrl,
+				resultJson: JSON.stringify({ resultUrls: [imageUrl] }),
+				model: openaiModel,
+				upstream: 'openai',
+				createdAt: Date.now(),
+			},
+		};
+		try {
+			await env.CACHE.put(`task:${taskId}`, JSON.stringify(taskRecord), { expirationTtl: 86400 });
+		} catch { /* non-critical */ }
+	}
+
+	return {
+		code: 200,
+		data: {
+			taskId,
+			recordId: taskId,
+		},
+	};
+}
+
 // ── Route handlers ──────────────────────────────────────────────
 
 async function handleGenerate(body, env, keyData) {
@@ -892,6 +1018,24 @@ async function handleGenerate(body, env, keyData) {
 				code: 200,
 			};
 		}
+	}
+
+	// Branch on upstream: OpenAI image models go direct, everything else to Kie
+	const modelConfig = MODELS[model];
+	if (modelConfig.upstream === 'openai' && modelConfig.type === 'image') {
+		const result = await handleOpenAIImageGenerate(env, body, keyData);
+		if (result.error) {
+			return result;
+		}
+		await trackUsage(env, keyData.key, credits, model, false);
+		if (cache !== false) {
+			const cacheKey = getCacheKey(model, prompt, params);
+			await setCache(env, cacheKey, result, 3600);
+		}
+		return {
+			data: { ...result.data, _credits: credits, _budget_remaining: budget.remaining || 0 },
+			code: 200,
+		};
 	}
 
 	const kieBody = buildKieBody(model, prompt, params);
@@ -1054,6 +1198,15 @@ async function handleThumbnailGenerate(body, env, keyData) {
 
 async function handleTaskStatus(taskId, env) {
 	if (!taskId) return { error: 'task_id is required', code: 400 };
+
+	// Check KV cache first (OpenAI image results are stored here)
+	if (env.CACHE) {
+		try {
+			const cached = await env.CACHE.get(`task:${taskId}`, 'json');
+			if (cached) return { data: cached, code: 200 };
+		} catch { /* fall through to Kie */ }
+	}
+
 	const result = await kieGet(`/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, env);
 	return { data: result, code: result.code === 200 ? 200 : (result.code || 500) };
 }
@@ -1061,7 +1214,17 @@ async function handleTaskStatus(taskId, env) {
 async function handleDownload(taskId, env) {
 	if (!taskId) return { error: 'task_id is required', code: 400 };
 
-	// Check R2 archive first — if already stored, return permanent URL immediately
+	// Check KV cache for OpenAI image results (sync path)
+	if (env.CACHE) {
+		try {
+			const cached = await env.CACHE.get(`task:${taskId}`, 'json');
+			if (cached && cached.data?.resultUrl) {
+				return { data: { code: 200, data: { url: cached.data.resultUrl } }, code: 200 };
+			}
+		} catch { /* fall through */ }
+	}
+
+	// Check R2 archive first -- if already stored, return permanent URL immediately
 	if (env.MEDIA_STORAGE) {
 		const existing = await env.MEDIA_STORAGE.head(`generations/${taskId}`);
 		if (existing) {
@@ -1382,6 +1545,7 @@ export default {
 		if (url.pathname === '/v1/models' && request.method === 'GET') {
 			const models = Object.entries(MODELS).map(([id, m]) => ({
 				id, type: m.type, name: m.name, provider: m.provider,
+				upstream: m.upstream || 'kie',
 				description: m.description, credits_per_gen: m.credits_per_gen,
 				featured: m.featured || false,
 				supports_editing: m.supports_editing || false,
