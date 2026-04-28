@@ -48,7 +48,8 @@ async function lookupTenantBySlug(slug, env) {
 		const data = await env.TENANTS.get(`slug:${slug}`, 'json');
 		if (!data) return null;
 		return { ...data, slug, resolution: 'subdomain' };
-	} catch {
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'kv_error', scope: 'lookupTenantBySlug', message: err.message }));
 		return null;
 	}
 }
@@ -63,7 +64,8 @@ async function lookupTenantByDomain(domain, env) {
 		const data = await env.TENANTS.get(`domain:${domain}`, 'json');
 		if (!data) return null;
 		return { ...data, resolution: 'custom_domain' };
-	} catch {
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'kv_error', scope: 'lookupTenantByDomain', message: err.message }));
 		return null;
 	}
 }
