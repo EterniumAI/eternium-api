@@ -288,9 +288,11 @@ const MODELS = {
 	},
 	'seedance-2': {
 		type: 'video', name: 'Seedance 2.0', provider: 'ByteDance', upstream: 'kie',
-		description: 'ByteDance video generation with dance and motion specialization',
+		description: 'ByteDance video generation with motion specialization, lip-sync, and multimodal references (up to 9 images, 3 videos, 3 audio files)',
 		defaults: { duration: 5, aspect_ratio: '16:9', mode: 'std' },
-		credits_per_gen: '91-286', featured: true,
+		credits_per_gen: '91-286',
+		multimodal: { max_images: 9, max_videos: 3, max_audios: 3 },
+		featured: true,
 	},
 	'kling-3.0': {
 		type: 'video', name: 'Kling 3.0', provider: 'Kling', upstream: 'kie',
@@ -870,6 +872,16 @@ function buildKieBody(model, prompt, params) {
 			kieBody.input.multi_prompt = multiPrompts;
 			kieBody.input.sound = true;
 			if (params.kling_elements) kieBody.input.kling_elements = params.kling_elements;
+		}
+		// Seedance 2.0 multimodal -- accepts up to 9 images + 3 videos + 3 audios.
+		// Other Kie video models silently ignore these fields.
+		if (model === 'seedance-2') {
+			if (Array.isArray(params.video_urls) && params.video_urls.length > 0) {
+				kieBody.input.video_urls = params.video_urls.slice(0, 3);
+			}
+			if (Array.isArray(params.audio_urls) && params.audio_urls.length > 0) {
+				kieBody.input.audio_urls = params.audio_urls.slice(0, 3);
+			}
 		}
 		return kieBody;
 	}
