@@ -990,7 +990,7 @@ function buildKieBody(model, prompt, params) {
 		'sora-2':          'sora-2/video',
 		'wan-2.6':         'wan-2.6/video',
 		'hailuo-2.3':      'hailuo-2.3/video',
-		'seedance-2':      'seedance-2.0/video',
+		'seedance-2':      'bytedance/seedance-2',
 	};
 
 	const kieModel = KIE_SLUGS[model] || model;
@@ -1008,6 +1008,36 @@ function buildKieBody(model, prompt, params) {
 				output_format: params.output_format || modelConfig.defaults.output_format || 'png',
 			},
 		};
+	} else if (model === 'seedance-2') {
+		// Seedance 2.0 uses Bytedance's reference_*_urls schema (not the Kling-style
+		// image_urls/sound/multi_shots), so build a dedicated body — Kie 422s the
+		// request if it sees fields that don't match the model's input contract.
+		// Mode → resolution mapping: std → 720p, pro → 1080p (Kie has no `mode` param).
+		const sdMode = params.mode || modelConfig.defaults.mode || 'std';
+		const sdResolution = params.resolution || (sdMode === 'pro' ? '1080p' : '720p');
+		const sd = {
+			model: kieModel,
+			callBackUrl: params.callback_url || '',
+			input: {
+				prompt,
+				duration: params.duration || modelConfig.defaults.duration || 5,
+				aspect_ratio: params.aspect_ratio || modelConfig.defaults.aspect_ratio || '16:9',
+				resolution: sdResolution,
+				generate_audio: params.sound ?? params.generate_audio ?? modelConfig.defaults.sound ?? false,
+			},
+		};
+		if (Array.isArray(params.image_urls) && params.image_urls.length > 0) {
+			sd.input.reference_image_urls = params.image_urls.slice(0, 9);
+		}
+		if (Array.isArray(params.video_urls) && params.video_urls.length > 0) {
+			sd.input.reference_video_urls = params.video_urls.slice(0, 3);
+		}
+		if (Array.isArray(params.audio_urls) && params.audio_urls.length > 0) {
+			sd.input.reference_audio_urls = params.audio_urls.slice(0, 3);
+		}
+		if (params.first_frame_url) sd.input.first_frame_url = params.first_frame_url;
+		if (params.last_frame_url) sd.input.last_frame_url = params.last_frame_url;
+		return sd;
 	} else {
 		const kieBody = {
 			model: kieModel,
@@ -1034,16 +1064,6 @@ function buildKieBody(model, prompt, params) {
 			kieBody.input.multi_prompt = multiPrompts;
 			kieBody.input.sound = true;
 			if (params.kling_elements) kieBody.input.kling_elements = params.kling_elements;
-		}
-		// Seedance 2.0 multimodal -- accepts up to 9 images + 3 videos + 3 audios.
-		// Other Kie video models silently ignore these fields.
-		if (model === 'seedance-2') {
-			if (Array.isArray(params.video_urls) && params.video_urls.length > 0) {
-				kieBody.input.video_urls = params.video_urls.slice(0, 3);
-			}
-			if (Array.isArray(params.audio_urls) && params.audio_urls.length > 0) {
-				kieBody.input.audio_urls = params.audio_urls.slice(0, 3);
-			}
 		}
 		return kieBody;
 	}
