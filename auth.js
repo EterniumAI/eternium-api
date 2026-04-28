@@ -94,7 +94,10 @@ async function verifySupabaseJWT(token, secret, expectedIssuer) {
 		if (expectedIssuer && payload.iss !== expectedIssuer) return null;
 
 		return payload;
-	} catch { return null; }
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'auth_error', scope: 'verifyJwt', message: err.message }));
+		return null;
+	}
 }
 
 // ── JWKS cache for RS256 verification ──────────────────────────
@@ -111,7 +114,10 @@ async function fetchJwks(issuer) {
 		if (!Array.isArray(keys)) return null;
 		_jwksCache.set(issuer, { keys, fetchedAt: Date.now() });
 		return keys;
-	} catch { return null; }
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'upstream_error', scope: 'fetchJwks', message: err.message }));
+		return null;
+	}
 }
 
 async function verifyJwtRS256(token, issuer) {
@@ -144,7 +150,10 @@ async function verifyJwtRS256(token, issuer) {
 		const data = new TextEncoder().encode(`${headerB64}.${bodyB64}`);
 		const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', cryptoKey, sigBytes, data);
 		return valid ? payload : null;
-	} catch { return null; }
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'auth_error', scope: 'verifyJwtRS256', message: err.message }));
+		return null;
+	}
 }
 
 // Supabase API fallback — verifies the token by calling /auth/v1/user.
@@ -166,7 +175,10 @@ async function verifyViaSupabaseApi(token, env) {
 		// Must have email + id to be usable
 		if (!user?.email || !user?.id) return null;
 		return { email: user.email, source: 'supabase', supabaseUid: user.id };
-	} catch { return null; }
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'upstream_error', scope: 'verifyViaSupabaseApi', message: err.message }));
+		return null;
+	}
 }
 
 // Unified request authentication middleware.
@@ -343,7 +355,10 @@ async function verifyStripeSignature(body, sigHeader, secret) {
 async function getUser(env, email) {
 	if (!env.USERS) return null;
 	try { return await env.USERS.get(`user:${email.toLowerCase()}`, 'json'); }
-	catch { return null; }
+	catch (err) {
+		console.error(JSON.stringify({ event: 'kv_error', scope: 'getUser', message: err.message }));
+		return null;
+	}
 }
 
 // Secondary UID index: uid:<supabaseUid> -> email string.
@@ -354,12 +369,18 @@ async function getUserByUid(env, supabaseUid) {
 		const email = await env.USERS.get(`uid:${supabaseUid}`);
 		if (!email) return null;
 		return await getUser(env, email);
-	} catch { return null; }
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'kv_error', scope: 'getUserByUid', message: err.message }));
+		return null;
+	}
 }
 
 async function saveUserUidIndex(env, supabaseUid, email) {
 	if (!env.USERS || !supabaseUid) return;
-	try { await env.USERS.put(`uid:${supabaseUid}`, email.toLowerCase()); } catch { /* non-fatal */ }
+	try { await env.USERS.put(`uid:${supabaseUid}`, email.toLowerCase()); } catch (err) {
+		// non-fatal — UID index write failure
+		console.error(JSON.stringify({ event: 'kv_error', scope: 'saveUserUidIndex', message: err.message }));
+	}
 }
 
 async function saveUser(env, user) {
@@ -503,7 +524,10 @@ export async function handleProvisionKey(request, env) {
 	try {
 		const text = await request.text();
 		if (text) body = JSON.parse(text);
-	} catch { /* ignore malformed body, use defaults */ }
+	} catch (err) {
+		// ignore malformed body, use defaults
+		console.error(JSON.stringify({ event: 'parse_error', scope: 'handleProvisionKey', message: err.message }));
+	}
 
 	let user = await ensureSupabaseUser(auth.email, auth.supabaseUid, env);
 	if (!user) return { error: 'User not found', code: 404 };
@@ -543,7 +567,10 @@ export async function handleRegenerateKey(request, env) {
 				if (keyData && keyData.email) {
 					user = await getUser(env, keyData.email);
 				}
-			} catch { /* fall through to JWT */ }
+			} catch (err) {
+				console.error(JSON.stringify({ event: 'kv_error', scope: 'handleRegenerateKey', message: err.message }));
+				/* fall through to JWT */
+			}
 		}
 		// Fall back to JWT auth (custom or Supabase) if API key lookup didn't find a user
 		if (!user) {
@@ -668,7 +695,9 @@ async function getInstallationToken(env) {
 		try {
 			const { token, expiresAt } = JSON.parse(cached);
 			if (token && expiresAt > Date.now() + 60000) return token;
-		} catch {}
+		} catch (err) {
+			console.error(JSON.stringify({ event: 'cache_error', scope: 'getInstallationToken', message: err.message }));
+		}
 	}
 
 	const jwt = await generateAppJWT(env);

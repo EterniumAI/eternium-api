@@ -80,3 +80,16 @@ crons = ["30 13 * * *"]
 
 [assets]
 directory = "./public"
+
+# ── Logpush to R2 ────────────────────────────────────────────────
+# Enable via Cloudflare Dashboard > Workers > eternium-api > Logs > Push
+# Destination: R2 bucket "eternium-logs"
+# Filters: include console.error/console.warn only (saves cost)
+# Format: JSON, ND-JSON gzip
+[observability]
+enabled = true
+head_sampling_rate = 1.0
+
+# [[r2_buckets]]
+# binding = "LOGS"
+# bucket_name = "eternium-logs"

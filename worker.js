@@ -57,6 +57,16 @@ import {
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
 const API_VERSION = '3.0.0';
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 25000) {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		return await fetch(url, { ...options, signal: controller.signal });
+	} finally {
+		clearTimeout(timer);
+	}
+}
 const CREDIT_VALUE = 0.005; // 1 credit = $0.005 — half a penny (200 credits per dollar)
 
 // CORS: Open to all origins. Security is enforced by API key authentication,
@@ -403,19 +413,17 @@ const PIPELINES = {
 };
 
 // ── Cache helpers (KV-based, for agent dedup) ───────────────────
-function getCacheKey(model, prompt, params) {
+async function getCacheKey(model, prompt, params) {
 	const normalized = JSON.stringify({ model, prompt: prompt.trim().toLowerCase(), ...params });
-	return `cache:${hashCode(normalized)}`;
+	return `cache:${await hashCode(normalized)}`;
 }
 
-function hashCode(str) {
-	let hash = 0;
-	for (let i = 0; i < str.length; i++) {
-		const ch = str.charCodeAt(i);
-		hash = ((hash << 5) - hash) + ch;
-		hash |= 0;
-	}
-	return Math.abs(hash).toString(36);
+async function hashCode(str) {
+	const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+	return Array.from(new Uint8Array(buf))
+		.map(b => b.toString(16).padStart(2, '0'))
+		.join('')
+		.slice(0, 16);
 }
 
 async function getCached(env, key) {
@@ -423,14 +431,20 @@ async function getCached(env, key) {
 	try {
 		const cached = await env.CACHE.get(key, 'json');
 		return cached;
-	} catch { return null; }
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'cache_error', scope: 'getCached', message: err.message }));
+		return null;
+	}
 }
 
 async function setCache(env, key, data, ttlSeconds = 3600) {
 	if (!env.CACHE) return;
 	try {
 		await env.CACHE.put(key, JSON.stringify(data), { expirationTtl: ttlSeconds });
-	} catch { /* non-critical */ }
+	} catch (err) {
+		// non-critical — cache write failure doesn't affect the response
+		console.error(JSON.stringify({ event: 'cache_error', scope: 'setCache', message: err.message }));
+	}
 }
 
 // ── Usage tracking (KV-based, in credits) ───────────────────────
@@ -444,7 +458,8 @@ async function getUsage(env, apiKey) {
 	try {
 		const data = await env.USAGE.get(getUsageKey(apiKey), 'json');
 		return data || { spent: 0, generations: 0, cached: 0, tasks: [] };
-	} catch {
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'kv_error', scope: 'getUsage', message: err.message }));
 		return { spent: 0, generations: 0, cached: 0, tasks: [] };
 	}
 }
@@ -459,7 +474,10 @@ async function trackUsage(env, apiKey, credits, model, cached = false) {
 	if (usage.tasks.length > 100) usage.tasks = usage.tasks.slice(0, 100);
 	try {
 		await env.USAGE.put(getUsageKey(apiKey), JSON.stringify(usage), { expirationTtl: 90 * 86400 });
-	} catch { /* non-critical */ }
+	} catch (err) {
+		// non-critical — usage tracking failure doesn't block the request
+		console.error(JSON.stringify({ event: 'usage_track_error', scope: 'trackUsage', message: err.message }));
+	}
 }
 
 async function checkBudget(env, apiKey, tier, credits) {
@@ -477,12 +495,18 @@ async function validateApiKey(key, env) {
 		try {
 			const data = await env.API_KEYS.get(`key:${key}`, 'json');
 			if (data) return data;
-		} catch { /* fall through */ }
+		} catch (err) {
+			console.error(JSON.stringify({ event: 'kv_error', scope: 'validateApiKey', message: err.message }));
+			/* fall through */
+		}
 	}
 	try {
 		const keys = JSON.parse(env.API_KEYS_JSON || '[]');
 		return keys.find(k => k.key === key) || null;
-	} catch { return null; }
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'parse_error', scope: 'validateApiKey', message: err.message }));
+		return null;
+	}
 }
 
 // ── Rate limiting (in-memory, per-worker) ───────────────────────
@@ -519,19 +543,37 @@ function corsHeaders(origin) {
 
 // ── Kie.ai proxy ────────────────────────────────────────────────
 async function kieRequest(path, body, env) {
-	const res = await fetch(`${KIE_BASE}${path}`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.KIE_API_KEY}` },
-		body: JSON.stringify(body),
-	});
+	let res;
+	try {
+		res = await fetchWithTimeout(`${KIE_BASE}${path}`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.KIE_API_KEY}` },
+			body: JSON.stringify(body),
+		}, 25000);
+	} catch (e) {
+		if (e.name === 'AbortError') {
+			console.error(JSON.stringify({ event: 'upstream_timeout', target: 'kie', path }));
+			return { error: 'Upstream timeout', code: 504 };
+		}
+		throw e;
+	}
 	return res.json();
 }
 
 async function kieGet(path, env) {
-	const res = await fetch(`${KIE_BASE}${path}`, {
-		method: 'GET',
-		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.KIE_API_KEY}` },
-	});
+	let res;
+	try {
+		res = await fetchWithTimeout(`${KIE_BASE}${path}`, {
+			method: 'GET',
+			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.KIE_API_KEY}` },
+		}, 25000);
+	} catch (e) {
+		if (e.name === 'AbortError') {
+			console.error(JSON.stringify({ event: 'upstream_timeout', target: 'kie', path }));
+			return { error: 'Upstream timeout', code: 504 };
+		}
+		throw e;
+	}
 	return res.json();
 }
 
@@ -564,11 +606,20 @@ async function openaiProxy(path, request, env, keyData) {
 		upstreamHeaders['Content-Type'] = contentType;
 	}
 
-	const upstreamRes = await fetch(`${OPENAI_BASE}${path}`, {
-		method: 'POST',
-		headers: upstreamHeaders,
-		body: request.body,
-	});
+	let upstreamRes;
+	try {
+		upstreamRes = await fetchWithTimeout(`${OPENAI_BASE}${path}`, {
+			method: 'POST',
+			headers: upstreamHeaders,
+			body: request.body,
+		}, 60000);
+	} catch (e) {
+		if (e.name === 'AbortError') {
+			console.error(JSON.stringify({ event: 'upstream_timeout', target: 'openai', path }));
+			return { error: 'Upstream timeout', code: 504 };
+		}
+		throw e;
+	}
 
 	return upstreamRes;
 }
@@ -584,7 +635,7 @@ async function openrouterFallback(path, body, env) {
 	if (orBody.max_tokens && orBody.max_tokens < 16) orBody.max_tokens = 16;
 
 	try {
-		const res = await fetch(`${OPENROUTER_BASE}${path}`, {
+		const res = await fetchWithTimeout(`${OPENROUTER_BASE}${path}`, {
 			method: 'POST',
 			headers: {
 				'Authorization': `Bearer ${env.OPENROUTER_API_KEY}`,
@@ -593,7 +644,7 @@ async function openrouterFallback(path, body, env) {
 				'X-Title': 'Eternium API',
 			},
 			body: JSON.stringify(orBody),
-		});
+		}, 30000);
 		if (res.ok) return res;
 		// If OpenRouter also fails, log the error for debugging
 		const errText = await res.text().catch(() => 'unknown');
@@ -637,15 +688,18 @@ async function handleChatCompletions(request, env, keyData) {
 	if (isStreaming) {
 		let upstreamRes;
 		try {
-			upstreamRes = await fetch(`${OPENAI_BASE}/chat/completions`, {
+			upstreamRes = await fetchWithTimeout(`${OPENAI_BASE}/chat/completions`, {
 				method: 'POST',
 				headers: {
 					'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
 					'Content-Type': 'application/json',
 				},
 				body: JSON.stringify(body),
-			});
+			}, 60000);
 		} catch (e) {
+			if (e.name === 'AbortError') {
+				console.error(JSON.stringify({ event: 'upstream_timeout', target: 'openai_chat_stream' }));
+			}
 			upstreamRes = null;
 		}
 		if (!upstreamRes || upstreamRes.status >= 500 || upstreamRes.status === 429) {
@@ -686,11 +740,16 @@ async function handleChatCompletions(request, env, keyData) {
 									const credits = getChatCost(model, parsed.usage.prompt_tokens || 0, parsed.usage.completion_tokens || 0, keyData.tier);
 									await trackUsage(env, keyData.key, credits, model, false);
 								}
-							} catch { /* not JSON or no usage */ }
+							} catch (err) {
+								// not JSON or no usage — expected for non-data SSE lines
+								console.error(JSON.stringify({ event: 'parse_error', scope: 'chatStream', message: err.message }));
+							}
 						}
 					}
 				}
-			} catch { /* stream error */ }
+			} catch (err) {
+				console.error(JSON.stringify({ event: 'upstream_error', scope: 'chatStream', message: err.message }));
+			}
 			finally { await writer.close(); }
 		})();
 
@@ -740,15 +799,20 @@ async function handleEmbeddings(request, env, keyData) {
 
 	let upstreamRes;
 	try {
-		upstreamRes = await fetch(`${OPENAI_BASE}/embeddings`, {
+		upstreamRes = await fetchWithTimeout(`${OPENAI_BASE}/embeddings`, {
 			method: 'POST',
 			headers: {
 				'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
 				'Content-Type': 'application/json',
 			},
 			body: JSON.stringify(body),
-		});
-	} catch { upstreamRes = null; }
+		}, 25000);
+	} catch (err) {
+		if (err.name === 'AbortError') {
+			console.error(JSON.stringify({ event: 'upstream_timeout', target: 'openai_embeddings' }));
+		}
+		upstreamRes = null;
+	}
 
 	if (!upstreamRes || upstreamRes.status >= 500 || upstreamRes.status === 429) {
 		const fallback = await openrouterFallback('/embeddings', body, env);
@@ -919,15 +983,19 @@ async function handleOpenAIImageGenerate(env, body, keyData) {
 
 	let openaiRes;
 	try {
-		openaiRes = await fetch('https://api.openai.com/v1/images/generations', {
+		openaiRes = await fetchWithTimeout('https://api.openai.com/v1/images/generations', {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
 				'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
 			},
 			body: JSON.stringify(openaiBody),
-		});
+		}, 60000);
 	} catch (e) {
+		if (e.name === 'AbortError') {
+			console.error(JSON.stringify({ event: 'upstream_timeout', target: 'openai_image', model: openaiModel }));
+			return { error: 'Upstream timeout', code: 504 };
+		}
 		return { error: `OpenAI request failed: ${e.message}`, code: 502 };
 	}
 
@@ -936,7 +1004,10 @@ async function handleOpenAIImageGenerate(env, body, keyData) {
 		try {
 			const errBody = await openaiRes.json();
 			errMsg = errBody.error?.message || errMsg;
-		} catch { /* use default */ }
+		} catch (err) {
+			// use default error message if response body parsing fails
+			console.error(JSON.stringify({ event: 'parse_error', scope: 'handleOpenAIImageGenerate', message: err.message }));
+		}
 		return { error: errMsg, code: openaiRes.status >= 400 && openaiRes.status < 500 ? openaiRes.status : 502 };
 	}
 
@@ -967,7 +1038,10 @@ async function handleOpenAIImageGenerate(env, body, keyData) {
 		};
 		try {
 			await env.CACHE.put(`task:${taskId}`, JSON.stringify(taskRecord), { expirationTtl: 86400 });
-		} catch { /* non-critical */ }
+		} catch (err) {
+			// non-critical — task record cache write
+			console.error(JSON.stringify({ event: 'cache_error', scope: 'handleOpenAIImageGenerate', message: err.message }));
+		}
 	}
 
 	return {
@@ -1013,7 +1087,7 @@ async function handleGenerate(body, env, keyData) {
 
 	// Cache check (agent dedup)
 	if (cache !== false) {
-		const cacheKey = getCacheKey(model, prompt, params);
+		const cacheKey = await getCacheKey(model, prompt, params);
 		const cached = await getCached(env, cacheKey);
 		if (cached) {
 			await trackUsage(env, keyData.key, 0, model, true);
@@ -1033,7 +1107,7 @@ async function handleGenerate(body, env, keyData) {
 		}
 		await trackUsage(env, keyData.key, credits, model, false);
 		if (cache !== false) {
-			const cacheKey = getCacheKey(model, prompt, params);
+			const cacheKey = await getCacheKey(model, prompt, params);
 			await setCache(env, cacheKey, result, 3600);
 		}
 		return {
@@ -1050,7 +1124,7 @@ async function handleGenerate(body, env, keyData) {
 
 	// Cache the task creation response
 	if (cache !== false && result.code === 200) {
-		const cacheKey = getCacheKey(model, prompt, params);
+		const cacheKey = await getCacheKey(model, prompt, params);
 		await setCache(env, cacheKey, result, 3600);
 	}
 
@@ -1208,7 +1282,10 @@ async function handleTaskStatus(taskId, env) {
 		try {
 			const cached = await env.CACHE.get(`task:${taskId}`, 'json');
 			if (cached) return { data: cached, code: 200 };
-		} catch { /* fall through to Kie */ }
+		} catch (err) {
+			console.error(JSON.stringify({ event: 'cache_error', scope: 'handleTaskStatus', message: err.message }));
+			/* fall through to Kie */
+		}
 	}
 
 	const result = await kieGet(`/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, env);
@@ -1225,7 +1302,10 @@ async function handleDownload(taskId, env) {
 			if (cached && cached.data?.resultUrl) {
 				return { data: { code: 200, data: { url: cached.data.resultUrl } }, code: 200 };
 			}
-		} catch { /* fall through */ }
+		} catch (err) {
+			console.error(JSON.stringify({ event: 'cache_error', scope: 'handleDownload', message: err.message }));
+			/* fall through */
+		}
 	}
 
 	// Check R2 archive first -- if already stored, return permanent URL immediately
@@ -1447,7 +1527,8 @@ async function verifyElevenLabsSignature(rawBody, signature, secret) {
 			.map((b) => b.toString(16).padStart(2, '0'))
 			.join('');
 		return expected === signature || signature.includes(expected);
-	} catch {
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'auth_error', scope: 'verifyResendSignature', message: err.message }));
 		return false;
 	}
 }
@@ -1996,7 +2077,9 @@ export default {
 		// POST /v1/voice/session — issue short-lived ElevenLabs signed URL
 		if (url.pathname === '/v1/voice/session' && request.method === 'POST') {
 			let body = {};
-			try { body = await request.json(); } catch {}
+			try { body = await request.json(); } catch (err) {
+				console.error(JSON.stringify({ event: 'parse_error', scope: 'voiceSession', message: err.message }));
+			}
 			const result = await handleVoiceSession(body, env, keyData);
 			return json(result.data || { error: result.error, usage: result.usage }, result.code, headers);
 		}
@@ -2896,7 +2979,10 @@ async function verifyResourceSig(resource, expiry, sig, env) {
 		let diff = 0;
 		for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
 		return diff === 0;
-	} catch { return false; }
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'auth_error', scope: 'timingSafeEqual', message: err.message }));
+		return false;
+	}
 }
 
 // Check if a Supabase UID has been granted a resource. Checks KV user record first.
@@ -2909,7 +2995,10 @@ async function hasResourceAccess(supabaseUid, email, resource, env) {
 				const user = await env.USERS.get(`user:${emailFromUid.toLowerCase()}`, 'json');
 				if (user?.resources?.includes(resource)) return true;
 			}
-		} catch { /* fall through */ }
+		} catch (err) {
+			console.error(JSON.stringify({ event: 'kv_error', scope: 'hasResourceAccess', message: err.message }));
+			/* fall through */
+		}
 	}
 	// Fallback: Supabase profiles table
 	if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY && email) {
@@ -2922,7 +3011,10 @@ async function hasResourceAccess(supabaseUid, email, resource, env) {
 				const rows = await res.json();
 				if (rows[0]?.resources_granted?.includes(resource)) return true;
 			}
-		} catch { /* fall through */ }
+		} catch (err) {
+			console.error(JSON.stringify({ event: 'upstream_error', scope: 'hasResourceAccess', message: err.message }));
+			/* fall through */
+		}
 	}
 	return false;
 }
