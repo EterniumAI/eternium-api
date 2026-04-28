@@ -402,6 +402,22 @@ const PIPELINES = {
 	},
 };
 
+// ── Direct-provider fallback routing ──────────────────────────────
+// When Kie returns 429 or 5xx after one retry, route to the direct provider.
+// Keys come from wrangler secrets. If key is missing, fallback fails open
+// (returns the original Kie error). Margin is worse on direct routes —
+// every failover is logged to api_failover_events for visibility.
+const FALLBACK_PROVIDERS = {
+	'nano-banana-2':    { provider: 'google',   secret: 'GOOGLE_GEMINI_KEY' },
+	'nano-banana-pro':  { provider: 'google',   secret: 'GOOGLE_GEMINI_KEY' },
+	'sora-2':           { provider: 'openai',   secret: 'OPENAI_API_KEY' },
+	'veo-3':            { provider: 'google',   secret: 'GOOGLE_GEMINI_KEY' },
+	'kling-3.0':        { provider: 'fal',      secret: 'FAL_API_KEY' },
+	'kling-3.0-mc':     { provider: 'fal',      secret: 'FAL_API_KEY' },
+	'flux-kontext':     { provider: 'bfl',      secret: 'BFL_API_KEY' },
+	// Models without an entry simply fail with the Kie error.
+};
+
 // ── Cache helpers (KV-based, for agent dedup) ───────────────────
 function getCacheKey(model, prompt, params) {
 	const normalized = JSON.stringify({ model, prompt: prompt.trim().toLowerCase(), ...params });
@@ -533,6 +549,88 @@ async function kieGet(path, env) {
 		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.KIE_API_KEY}` },
 	});
 	return res.json();
+}
+
+// ── Kie failover wrapper ───────────────────────────────────────
+// Retry once on 429/5xx, then attempt direct-provider fallback.
+async function kieRequestWithFailover(path, body, env, model = null) {
+	const start = Date.now();
+
+	// Attempt 1: Kie
+	let res = await kieFetchRaw(path, body, env);
+	if (res.ok) return { ok: true, data: await res.json(), provider: 'kie' };
+
+	const status1 = res.status;
+	if (status1 === 429 || status1 >= 500) {
+		// Sleep 600ms, retry Kie once
+		await new Promise(r => setTimeout(r, 600));
+		res = await kieFetchRaw(path, body, env);
+		if (res.ok) return { ok: true, data: await res.json(), provider: 'kie', retried: true };
+	}
+
+	const status2 = res.status;
+	const fallback = model ? FALLBACK_PROVIDERS[model] : null;
+
+	if (fallback && env[fallback.secret] && (status2 === 429 || status2 >= 500)) {
+		// Failover to direct provider
+		const directRes = await callDirectProvider(fallback.provider, model, body, env);
+		const latencyMs = Date.now() - start;
+		await logFailoverEvent(env, {
+			model,
+			kie_status: status2,
+			fallback_provider: fallback.provider,
+			success: directRes.ok,
+			latency_ms: latencyMs,
+		});
+		if (directRes.ok) return { ok: true, data: directRes.data, provider: fallback.provider };
+	}
+
+	// No fallback or fallback failed — return Kie error
+	let errBody;
+	try { errBody = await res.json(); } catch { errBody = { error: 'Upstream error' }; }
+	return { ok: false, status: status2, error: errBody, provider: 'kie' };
+}
+
+async function kieFetchRaw(path, body, env) {
+	return fetch(`${KIE_BASE}${path}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.KIE_API_KEY}` },
+		body: JSON.stringify(body),
+		signal: AbortSignal.timeout(25000),
+	});
+}
+
+// TODO: implement google/openai/fal/bfl direct calls with model-specific
+// request shaping. Each provider's response must be normalized to the
+// Kie task shape: { code, data: { taskId, ... } }.
+async function callDirectProvider(provider, model, body, env) {
+	// Stub — wire each provider in follow-up dispatch when keys land.
+	// For now, return { ok: false } so the failover gracefully falls through.
+	console.error(JSON.stringify({
+		event: 'failover_stub_called',
+		provider,
+		model,
+	}));
+	return { ok: false };
+}
+
+async function logFailoverEvent(env, payload) {
+	if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return;
+	try {
+		await fetch(`${env.SUPABASE_URL}/rest/v1/api_failover_events`, {
+			method: 'POST',
+			headers: {
+				'apikey': env.SUPABASE_SERVICE_KEY,
+				'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+				'Content-Type': 'application/json',
+				'Prefer': 'return=minimal',
+			},
+			body: JSON.stringify(payload),
+			signal: AbortSignal.timeout(5000),
+		});
+	} catch (err) {
+		console.error(JSON.stringify({ event: 'failover_log_error', message: err.message }));
+	}
 }
 
 // ── OpenAI proxy with OpenRouter fallback ──────────────────────
@@ -1043,20 +1141,23 @@ async function handleGenerate(body, env, keyData) {
 	}
 
 	const kieBody = buildKieBody(model, prompt, params);
-	const result = await kieRequest('/jobs/createTask', kieBody, env);
+	const result = await kieRequestWithFailover('/jobs/createTask', kieBody, env, model);
+	if (!result.ok) {
+		return { error: result.error?.error || 'Upstream error', code: result.status || 503 };
+	}
 
 	// Track usage
 	await trackUsage(env, keyData.key, credits, model, false);
 
 	// Cache the task creation response
-	if (cache !== false && result.code === 200) {
+	if (cache !== false && result.data.code === 200) {
 		const cacheKey = getCacheKey(model, prompt, params);
-		await setCache(env, cacheKey, result, 3600);
+		await setCache(env, cacheKey, result.data, 3600);
 	}
 
 	return {
-		data: { ...result, _credits: credits, _budget_remaining: budget.remaining || 0 },
-		code: result.code === 200 ? 200 : (result.code || 500),
+		data: { ...result.data, _credits: credits, _budget_remaining: budget.remaining || 0, _provider: result.provider },
+		code: result.data.code === 200 ? 200 : (result.data.code || 500),
 	};
 }
 
@@ -1093,16 +1194,27 @@ async function handlePipeline(body, env, keyData) {
 		const stepPrompt = step.promptTemplate.replace('{prompt}', prompt);
 		const stepParams = { ...params, ...step.overrides };
 		const kieBody = buildKieBody(step.model, stepPrompt, stepParams);
-		const result = await kieRequest('/jobs/createTask', kieBody, env);
+		const result = await kieRequestWithFailover('/jobs/createTask', kieBody, env, step.model);
 		const credits = getGenerationCost(step.model, stepParams, keyData.tier);
 		await trackUsage(env, keyData.key, credits, step.model, false);
-		tasks.push({
-			model: step.model,
-			taskId: result.data?.taskId || null,
-			credits,
-			status: result.code === 200 ? 'submitted' : 'failed',
-			error: result.code !== 200 ? result.msg : undefined,
-		});
+		if (result.ok) {
+			tasks.push({
+				model: step.model,
+				taskId: result.data.data?.taskId || null,
+				credits,
+				status: result.data.code === 200 ? 'submitted' : 'failed',
+				error: result.data.code !== 200 ? result.data.msg : undefined,
+				provider: result.provider,
+			});
+		} else {
+			tasks.push({
+				model: step.model,
+				taskId: null,
+				credits,
+				status: 'failed',
+				error: result.error?.error || 'Upstream error',
+			});
+		}
 	}
 
 	return {
@@ -1172,16 +1284,28 @@ async function handleThumbnailGenerate(body, env, keyData) {
 	// Fire all 3 generations in parallel
 	const tasks = await Promise.all(variants.map(async (v) => {
 		const kieBody = buildKieBody(imgModel, v.prompt, { aspect_ratio: '16:9' });
-		const result = await kieRequest('/jobs/createTask', kieBody, env);
+		const result = await kieRequestWithFailover('/jobs/createTask', kieBody, env, imgModel);
 		await trackUsage(env, keyData.key, creditsPerGen, imgModel, false);
+		if (result.ok) {
+			return {
+				variant: v.label,
+				description: v.description,
+				task_id: result.data.data?.taskId || null,
+				model: imgModel,
+				credits: creditsPerGen,
+				status: result.data.code === 200 ? 'submitted' : 'failed',
+				error: result.data.code !== 200 ? result.data.msg : undefined,
+				provider: result.provider,
+			};
+		}
 		return {
 			variant: v.label,
 			description: v.description,
-			task_id: result.data?.taskId || null,
+			task_id: null,
 			model: imgModel,
 			credits: creditsPerGen,
-			status: result.code === 200 ? 'submitted' : 'failed',
-			error: result.code !== 200 ? result.msg : undefined,
+			status: 'failed',
+			error: result.error?.error || 'Upstream error',
 		};
 	}));
 
