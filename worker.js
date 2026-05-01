@@ -280,7 +280,7 @@ const MODELS = {
 	// ── Video ── Featured first ──
 	'kling-3.0-mc': {
 		type: 'video', name: 'Kling 3.0 Motion Control', provider: 'Kling', upstream: 'kie',
-		description: 'Advanced video with camera path control, element references, and multi-shot',
+		description: 'Motion transfer — drive a character image with a reference video to copy motion, expressions, and timing while preserving identity',
 		defaults: { duration: 5, aspect_ratio: '16:9', mode: 'std', sound: false },
 		credits_per_gen: '91-364', featured: true,
 	},
@@ -984,7 +984,7 @@ function buildKieBody(model, prompt, params) {
 		'gpt-image-2':     'gpt-image-2-text-to-image',
 		'gpt-5.4-image':   'gpt-image-2-text-to-image',
 		'kling-3.0':       'kling-3.0/video',
-		'kling-3.0-mc':    'kling-3.0/video',
+		'kling-3.0-mc':    'kling-3.0/motion-control',
 		'kling-2.6':       'kling-2.6/video',
 		'veo-3':           'veo-3/video',
 		'sora-2':          'sora-2/video',
@@ -1008,6 +1008,29 @@ function buildKieBody(model, prompt, params) {
 				output_format: params.output_format || modelConfig.defaults.output_format || 'png',
 			},
 		};
+	} else if (model === 'kling-3.0-mc') {
+		// Kling 3.0 Motion Control is a single-shot motion-transfer pipeline,
+		// NOT multi-shot — they share the suffix "-mc" but are different Kie features.
+		// Forward only the fields kling-3.0/motion-control accepts; injecting
+		// multi_shots/multi_prompt here makes Kie 422 (image_urls cardinality
+		// validator fires) or 500 (multi-shot vs motion-control contradiction).
+		// Note: caller's image_urls maps to upstream input_urls.
+		const mcInputUrls = Array.isArray(params.input_urls) && params.input_urls.length > 0
+			? params.input_urls
+			: (Array.isArray(params.image_urls) ? params.image_urls : []);
+		const mc = {
+			model: kieModel,
+			callBackUrl: params.callback_url || '',
+			input: {
+				prompt,
+				input_urls: mcInputUrls.slice(0, 1),
+				video_urls: Array.isArray(params.video_urls) ? params.video_urls.slice(0, 1) : [],
+				mode: params.mode || modelConfig.defaults.mode || 'std',
+			},
+		};
+		if (params.character_orientation) mc.input.character_orientation = params.character_orientation;
+		if (params.background_source) mc.input.background_source = params.background_source;
+		return mc;
 	} else if (model === 'seedance-2') {
 		// Seedance 2.0 uses Bytedance's reference_*_urls schema (not the Kling-style
 		// image_urls/sound/multi_shots), so build a dedicated body — Kie 422s the
@@ -1059,7 +1082,7 @@ function buildKieBody(model, prompt, params) {
 		const multiPrompts = Array.isArray(params.multi_prompt) && params.multi_prompt.length > 0
 			? params.multi_prompt
 			: null;
-		if (model === 'kling-3.0-mc' || (model === 'kling-3.0' && params.multi_shots && multiPrompts)) {
+		if (model === 'kling-3.0' && params.multi_shots && multiPrompts) {
 			kieBody.input.multi_shots = true;
 			kieBody.input.multi_prompt = multiPrompts;
 			kieBody.input.sound = true;
