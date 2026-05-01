@@ -74,9 +74,13 @@ bucket_name = "eternium-media"
 # Token missing Zone > Workers Routes > Edit permission. Re-enable when token is updated.
 
 # ── Cron Triggers ─────────────────────────────────────────────────
-# Daily SOP morning brief at 7:30 AM MST (13:30 UTC)
-[triggers]
-crons = ["30 13 * * *"]
+# Daily SOP morning brief removed 2026-04-16 -- the canonical brief is
+# produced by /root/sovereign/scripts/morning-brief.js on the Bunker
+# (root crontab "37 14 * * *"). This Worker's scheduled trigger was
+# duplicating the send to Telegram with a stale date. Manual endpoint
+# at GET /admin/morning-brief is still available for ad-hoc triggering.
+# [triggers]
+# crons = ["30 13 * * *"]
 
 [assets]
 directory = "./public"
