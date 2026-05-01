@@ -1018,6 +1018,12 @@ function buildKieBody(model, prompt, params) {
 		const mcInputUrls = Array.isArray(params.input_urls) && params.input_urls.length > 0
 			? params.input_urls
 			: (Array.isArray(params.image_urls) ? params.image_urls : []);
+		// Kie motion-control's `mode` takes resolution literals (720p/1080p),
+		// not the std/pro tier names everywhere else in this codebase. Translate.
+		const mcCallerMode = params.mode || modelConfig.defaults.mode || 'std';
+		const mcMode = mcCallerMode === '1080p' || mcCallerMode === '720p'
+			? mcCallerMode
+			: (mcCallerMode === 'pro' ? '1080p' : '720p');
 		const mc = {
 			model: kieModel,
 			callBackUrl: params.callback_url || '',
@@ -1025,7 +1031,7 @@ function buildKieBody(model, prompt, params) {
 				prompt,
 				input_urls: mcInputUrls.slice(0, 1),
 				video_urls: Array.isArray(params.video_urls) ? params.video_urls.slice(0, 1) : [],
-				mode: params.mode || modelConfig.defaults.mode || 'std',
+				mode: mcMode,
 			},
 		};
 		if (params.character_orientation) mc.input.character_orientation = params.character_orientation;
