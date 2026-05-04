@@ -1618,6 +1618,54 @@ async function handleVoiceSession(body, env, keyData) {
 	}
 }
 
+// Issues a short-lived conversation token. Same broker pattern as
+// handleVoiceSession but calls ElevenLabs's /v1/convai/conversation/token
+// upstream — mobile clients (React Native via @elevenlabs/react-native) need
+// the WebRTC token flow because the WebSocket signedUrl path depends on
+// browser AudioContext / AudioWorklet, which RN doesn't have.
+async function handleVoiceToken(body, env, keyData) {
+	if (!env.ELEVENLABS_API_KEY) {
+		return { error: 'voice_unavailable: ELEVENLABS_API_KEY not configured', code: 503 };
+	}
+	const agentId = body.agent_id || env.ELEVENLABS_AGENT_ID_LAMARNIE;
+	if (!agentId) {
+		return { error: 'invalid_request: agent_id is required', code: 400 };
+	}
+
+	const reserved = getVoiceCost('elevenlabs-conv', 30, keyData.tier);
+	const budget = await checkBudget(env, keyData.key, keyData.tier, reserved);
+	if (!budget.allowed) {
+		return {
+			error: 'Monthly credit limit reached. Upgrade your tier or wait for reset.',
+			code: 402,
+			usage: { spent: budget.spent, limit: budget.limit },
+		};
+	}
+
+	try {
+		const res = await fetch(
+			`https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=${encodeURIComponent(agentId)}`,
+			{ headers: { 'xi-api-key': env.ELEVENLABS_API_KEY } }
+		);
+		if (!res.ok) {
+			const text = await res.text();
+			return { error: `elevenlabs: ${res.status} ${text}`, code: res.status };
+		}
+		const data = await res.json();
+		return {
+			data: {
+				token: data.token,
+				agentId,
+				apiKeyTier: keyData.tier,
+				conversationTag: `key:${keyData.key}:ts:${Date.now()}`,
+			},
+			code: 200,
+		};
+	} catch (err) {
+		return { error: `voice_token_failed: ${err.message}`, code: 500 };
+	}
+}
+
 /**
  * ElevenLabs post-call webhook.
  *
@@ -2259,13 +2307,23 @@ export default {
 			return json(result.data || { error: result.error, usage: result.usage }, result.code, headers);
 		}
 
-		// POST /v1/voice/session — issue short-lived ElevenLabs signed URL
+		// POST /v1/voice/session — issue short-lived ElevenLabs signed URL (WebSocket flow)
 		if (url.pathname === '/v1/voice/session' && request.method === 'POST') {
 			let body = {};
 			try { body = await request.json(); } catch (err) {
 				console.error(JSON.stringify({ event: 'parse_error', scope: 'voiceSession', message: err.message }));
 			}
 			const result = await handleVoiceSession(body, env, keyData);
+			return json(result.data || { error: result.error, usage: result.usage }, result.code, headers);
+		}
+
+		// POST /v1/voice/token — issue short-lived ElevenLabs conversation token (WebRTC flow)
+		if (url.pathname === '/v1/voice/token' && request.method === 'POST') {
+			let body = {};
+			try { body = await request.json(); } catch (err) {
+				console.error(JSON.stringify({ event: 'parse_error', scope: 'voiceToken', message: err.message }));
+			}
+			const result = await handleVoiceToken(body, env, keyData);
 			return json(result.data || { error: result.error, usage: result.usage }, result.code, headers);
 		}
 
