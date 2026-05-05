@@ -1745,8 +1745,26 @@ async function handleElevenLabsWebhook(request, env) {
 	};
 }
 
-async function verifyElevenLabsSignature(rawBody, signature, secret) {
+// ElevenLabs signs the `ElevenLabs-Signature` header as `t=<unix_ts>,v0=<hex_hash>`
+// where v0 is HMAC-SHA256 over `<unix_ts>.<rawBody>`. Reject signatures older than
+// 30 minutes to bound replay windows.
+async function verifyElevenLabsSignature(rawBody, signatureHeader, secret) {
 	try {
+		if (!signatureHeader) return false;
+		const parts = Object.fromEntries(
+			signatureHeader.split(',').map((s) => {
+				const i = s.indexOf('=');
+				return i === -1 ? [s.trim(), ''] : [s.slice(0, i).trim(), s.slice(i + 1).trim()];
+			})
+		);
+		const ts = parts.t;
+		const v0 = parts.v0;
+		if (!ts || !v0) return false;
+		const tsNum = Number(ts);
+		if (!Number.isFinite(tsNum)) return false;
+		const nowSec = Math.floor(Date.now() / 1000);
+		if (Math.abs(nowSec - tsNum) > 30 * 60) return false;
+
 		const enc = new TextEncoder();
 		const key = await crypto.subtle.importKey(
 			'raw',
@@ -1755,13 +1773,17 @@ async function verifyElevenLabsSignature(rawBody, signature, secret) {
 			false,
 			['sign']
 		);
-		const sigBuf = await crypto.subtle.sign('HMAC', key, enc.encode(rawBody));
+		const sigBuf = await crypto.subtle.sign('HMAC', key, enc.encode(`${ts}.${rawBody}`));
 		const expected = Array.from(new Uint8Array(sigBuf))
 			.map((b) => b.toString(16).padStart(2, '0'))
 			.join('');
-		return expected === signature || signature.includes(expected);
+		// Constant-time compare
+		if (expected.length !== v0.length) return false;
+		let mismatch = 0;
+		for (let i = 0; i < expected.length; i++) mismatch |= expected.charCodeAt(i) ^ v0.charCodeAt(i);
+		return mismatch === 0;
 	} catch (err) {
-		console.error(JSON.stringify({ event: 'auth_error', scope: 'verifyResendSignature', message: err.message }));
+		console.error(JSON.stringify({ event: 'auth_error', scope: 'verifyElevenLabsSignature', message: err.message }));
 		return false;
 	}
 }
