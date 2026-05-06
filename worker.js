@@ -2247,6 +2247,14 @@ export default {
 			return json({ error: 'Not found' }, 404, cors);
 		}
 
+		// ── Centramind MCP HTTP gateway ──────────────────────────────
+		// Route any POST /v1/<domain>.<tool> to the Centramind gateway handler.
+		const centramindMatch = url.pathname.match(/^\/v1\/([a-z_]+\.[a-z_]+)$/);
+		if (centramindMatch) {
+			const { handleCentramindToolRequest } = await import("./centramind/gateway.js");
+			return handleCentramindToolRequest(request, env, centramindMatch[1]);
+		}
+
 		// ── Authenticated routes ─────────────────────────────────────
 		const authResult = await authenticateRequest(request, env, validateApiKey);
 		if (authResult.error) {
